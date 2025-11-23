@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Teams Light Controller",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/teams_light_controller.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
+
