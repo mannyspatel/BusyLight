@@ -60,7 +60,7 @@ Save the `teams_light_controller.py` file to a location on your computer (e.g., 
 Open `teams_light_controller.py` in a text editor and verify/update these settings:
 
 ```python
-WLED_HOST = "wled-busylight.lan"  # Your WLED device hostname
+WLED_HOST = "wled-busylight.lan"  # Your WLED device hostname or IP
 CHECK_INTERVAL = 1.5              # Seconds between checks
 BRIGHTNESS = 128                  # Light brightness (0-255)
 EFFECT_SPEED = 128                # Animation speed (0-255)
@@ -79,15 +79,16 @@ python teams_light_controller.py
 You should see output like:
 ```
 ============================================================
-Teams Status Light Controller
+Teams Status Light Controller v1.1.0
 ============================================================
-WLED Host: wled-busylight.lan
+WLED host: wled-busylight.lan
 Check interval: 1.5s
+...
+Monitoring started. Press Ctrl+C to stop.
+============================================================
 
 Testing WLED connection...
 ✓ WLED connection successful (light should be GREEN)
-
-Monitoring started. Press Ctrl+C to stop.
 ```
 
 Press `Ctrl+C` to stop the script.
@@ -151,7 +152,9 @@ The script now properly distinguishes between different microphone states:
 - **Unmuted but Quiet**: When unmuted but not speaking, it shows yellow/red (solid)
 - **Speaking**: When unmuted and actively producing sound, the "breathe" effect activates
 
-The script uses Windows Core Audio API to check the system-level mute state, which works without admin rights or Teams API access. It can now visually distinguish between "muted" and "unmuted but quiet" states.
+The script checks the Windows system-level mute state through the Core Audio API, which works without admin rights or Teams API access.
+
+**Limitation:** Teams' mute button does not change the Windows system mute. For a mic muted inside Teams, the script falls back to a heuristic: if it has heard audio before and the mic then reads *exactly* zero for `MUTE_SILENCE_SECONDS` (15 by default), it assumes you are muted. So muting in Teams can take about 15 seconds to show, and a muted mic that has never been heard shows as "quiet". Tune `MUTE_SILENCE_SECONDS` in the script.
 
 ### Script Keeps Crashing or Not Starting
 
@@ -175,7 +178,7 @@ The script will automatically turn the WLED light completely off when it stops.
 3. Find `pythonw.exe`
 4. Right-click and select **End Task**
 
-The script will automatically turn the WLED light completely off when it exits, even if terminated unexpectedly.
+If you end the process this way it is killed outright and cannot clean up, so the light stays in its last state. Turn it off from the WLED app or web interface, or stop the script with `Ctrl+C` when you can.
 
 ## Customization
 
@@ -230,8 +233,9 @@ Available effects:
 Change these values to fine-tune behavior:
 
 ```python
-AUDIO_THRESHOLD = 0.001          # Lower = more sensitive (picks up quieter sounds)
-AUDIO_DETECTION_WINDOW = 2       # Seconds to keep "talking" state after sound stops
+AUDIO_THRESHOLD = 0.01           # Lower = more sensitive (picks up quieter sounds)
+AUDIO_DETECTION_WINDOW = 3       # Seconds to keep "talking" state after sound stops
+MUTE_SILENCE_SECONDS = 15        # Seconds of exact silence before assuming Teams-muted
 ```
 
 ## Technical Details
@@ -243,7 +247,7 @@ AUDIO_DETECTION_WINDOW = 2       # Seconds to keep "talking" state after sound s
 3. **Audio Detection**: Uses Windows Core Audio API (IAudioMeterInformation) to monitor if sound is being transmitted
 4. **WLED Communication**: Sends commands to your WLED device via HTTP JSON API
 5. **Polling**: Checks device status every 1.5 seconds and only updates the light when status changes
-6. **Cleanup on Exit**: Automatically turns the WLED light completely off when the script stops (via `atexit` handler and shutdown signal)
+6. **Cleanup on Exit**: Turns the WLED light off when the script stops with `Ctrl+C` or exits normally (not when the process is force-killed)
 
 ### No Admin Rights Needed
 
@@ -269,4 +273,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
+- **1.1.0** - Code cleanup: single mute check, configurable `MUTE_SILENCE_SECONDS`, narrower exception handling, shared HTTP session, docs aligned with the code
 - **1.0** - Initial release with camera detection, microphone mute detection, audio activity monitoring, and WLED integration

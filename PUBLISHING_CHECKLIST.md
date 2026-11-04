@@ -9,16 +9,14 @@
 ## 📋 Before Publishing - Review These:
 
 ### 1. **License**
-- Currently says "provided as-is for personal use"
-- **Decision needed**: Choose a proper open-source license (MIT, Apache 2.0, GPL, etc.)
-- Create a `LICENSE` file if publishing as open source
+- ✅ MIT License (`LICENSE` file present)
 
 ### 2. **Helper Scripts**
 - ✅ No helper scripts included (kept clean for distribution)
 
 ### 3. **Version Numbering**
-- Consider adding version number to the script itself
-- Update version in README when publishing new releases
+- ✅ `__version__` is defined in the script
+- Update it and the README version history on each release
 
 ### 4. **Security & Privacy**
 - ✅ No API keys or secrets in code
@@ -75,7 +73,7 @@
 
 1. ✅ **Choose a license** - MIT License added
 2. ✅ **Helper scripts** - Removed development-only files
-3. **Add version to script** - For easier tracking (optional)
+3. ✅ **Add version to script** - `__version__` added
 4. ✅ **Update README installation** - Added `pip install -r requirements.txt`
 5. **Test one more time** - Full workflow from install to shutdown
 
