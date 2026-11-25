@@ -41,10 +41,10 @@ Double-click setup installs **Python (when needed) and all pip packages in one r
 
 1. Download or clone this repository.
 2. Double-click **`install-busylight.cmd`** in the project folder (or run **`Install-BusyLight.ps1`**). The `.cmd` file opens a **PowerShell** window titled **BusyLight Setup** and runs the installer there.
-3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). On success it refreshes PATH and continues installing dependencies in the same window—no need to run the installer twice.
+3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). **Installer v1.3** tries a per-user (`--scope user`) install first, reloads your user PATH from the registry, searches common install folders if `python` is still missing, and only treats winget as successful when its output confirms the install—not just a zero exit code.
 4. Follow the on-screen messages. The installer skips packages that are already installed with a sufficient version, so it is safe to run again.
 
-After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.2** (or open `scripts/install-dependencies.ps1` and check that line 140 uses `Settings, Apps` rather than `Settings >`).
+After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.3**.
 
 If winget is blocked or unavailable, install Python from [python.org](https://www.python.org/downloads/), not the Microsoft Store shortcut—then run the installer again. If Windows still says Python is missing after you install, open **Settings → Apps → Advanced app settings → App execution aliases** and turn off the **python.exe** / **python3.exe** stubs so the real interpreter is used.
 
