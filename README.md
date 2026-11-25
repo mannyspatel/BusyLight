@@ -39,12 +39,14 @@ A Python application that monitors video-call status (Teams, Zoom, Webex, and ot
 
 Double-click setup installs **Python (when needed) and all pip packages in one run**:
 
+Save edited `.ps1` files as **UTF-8 with BOM** (or use ASCII punctuation only) so Windows PowerShell 5.1 parses them correctly.
+
 1. Download or clone this repository.
 2. Double-click **`install-busylight.cmd`** in the project folder (or run **`Install-BusyLight.ps1`**). The `.cmd` file opens a **PowerShell** window titled **BusyLight Setup** and runs the installer there.
-3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). **Installer v1.5** prefers `py -3.12` when multiple versions are installed, warns if the default interpreter is **3.13 or newer**, installs pip packages **one at a time** for clearer errors, and prints full **pip output** when a install fails. It also tries a per-user (`--scope user`) winget install first, then offers a silent [python.org](https://www.python.org/downloads/) download if winget fails or you skipped it.
+3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). **Installer v1.5.1** prefers `py -3.12` when multiple versions are installed, warns if the default interpreter is **3.13 or newer**, installs pip packages **one at a time** for clearer errors, and prints full **pip output** when a install fails. It also tries a per-user (`--scope user`) winget install first, then offers a silent [python.org](https://www.python.org/downloads/) download if winget fails or you skipped it.
 4. Follow the on-screen messages. The installer skips packages that are already installed with a sufficient version, so it is safe to run again.
 
-After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.5**.
+After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.5.1**.
 
 If `python --version` shows **3.13, 3.14, or 3.15**, install [Python 3.12](https://www.python.org/downloads/) (or run `py -3.12` if it is already installed) before installing packages—otherwise `pip install` may fail building `pycaw` and related dependencies.
 
