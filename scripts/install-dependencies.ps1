@@ -4,13 +4,15 @@
   Installs Python dependencies for the Teams Status Light Controller (BusyLight).
 
 .DESCRIPTION
-  Idempotent setup: installs Python via winget when missing, detects Python,
-  upgrades pip when needed, and installs packages from requirements.txt only
-  when they are missing or below minimum version.
+  Idempotent setup: installs Python via winget when missing, detects Python
+  (supported: 3.10–3.12; warns on 3.13+), upgrades pip when needed, and installs
+  packages from requirements.txt only when they are missing or below minimum version.
 #>
 
 $ErrorActionPreference = "Stop"
-$script:InstallerVersion = '1.4'
+$script:InstallerVersion = '1.5'
+$script:PythonMinorMin = 10
+$script:PythonMinorMax = 12
 
 function Write-Step {
     param([string]$Message)
@@ -79,6 +81,59 @@ function Import-UserPathFromRegistry {
     }
 }
 
+function Get-PythonVersionFromOutput {
+    param([string[]]$OutputLines)
+
+    if ($null -eq $OutputLines -or $OutputLines.Count -eq 0) {
+        return $null
+    }
+    $combined = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+    if ($combined -match 'Python\s+(\d+)\.(\d+)(?:\.(\d+))?') {
+        $patch = 0
+        if (-not [string]::IsNullOrWhiteSpace($Matches[3])) {
+            $patch = [int]$Matches[3]
+        }
+        return [pscustomobject]@{
+            Major = [int]$Matches[1]
+            Minor = [int]$Matches[2]
+            Patch = $patch
+        }
+    }
+    return $null
+}
+
+function Test-PythonVersionInSupportedRange {
+    param($Version)
+
+    if ($null -eq $Version -or $Version.Major -ne 3) {
+        return $false
+    }
+    return ($Version.Minor -ge $script:PythonMinorMin -and $Version.Minor -le $script:PythonMinorMax)
+}
+
+function New-PythonHandleFromLauncherCandidate {
+    param(
+        [string]$Cmd,
+        [string[]]$PyArgs,
+        [string[]]$VersionOutput
+    )
+
+    if ($Cmd -eq 'py') {
+        return @{
+            Launcher   = 'py'
+            PipArgs    = @($PyArgs + @('-m', 'pip'))
+            PyArgs     = $PyArgs
+            VersionOut = $VersionOutput
+        }
+    }
+    return @{
+        Launcher   = 'python'
+        PipArgs    = @('-m', 'pip')
+        PyArgs     = @()
+        VersionOut = $VersionOutput
+    }
+}
+
 function Find-PythonOnDisk {
     $exePaths = @()
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
@@ -91,36 +146,62 @@ function Find-PythonOnDisk {
     Get-ChildItem -Path $programFilesPattern -Filter 'python.exe' -Recurse -File -ErrorAction SilentlyContinue |
         ForEach-Object { $exePaths += $_.FullName }
 
+    $best = $null
+    $bestSort = $null
+
     foreach ($exe in ($exePaths | Select-Object -Unique)) {
         try {
             $output = @(& $exe --version 2>&1 | ForEach-Object { "$_" })
-            if ($LASTEXITCODE -eq 0 -and (Test-RealPythonVersionOutput -OutputLines $output)) {
-                return @{ Launcher = 'exe'; Exe = $exe }
+            if ($LASTEXITCODE -ne 0 -or -not (Test-RealPythonVersionOutput -OutputLines $output)) {
+                continue
+            }
+            $ver = Get-PythonVersionFromOutput -OutputLines $output
+            if (-not (Test-PythonVersionInSupportedRange -Version $ver)) {
+                continue
+            }
+            $sortKey = [version]"$($ver.Major).$($ver.Minor).$($ver.Patch)"
+            if ($null -eq $bestSort -or $sortKey -gt $bestSort) {
+                $bestSort = $sortKey
+                $best = @{
+                    Launcher   = 'exe'
+                    Exe        = $exe
+                    VersionOut = $output
+                }
             }
         }
         catch {
             # try next on-disk candidate
         }
     }
-    return $null
+    return $best
 }
 
 function Find-PythonExecutable {
     Import-UserPathFromRegistry
 
-    $candidates = @(
-        @{ Cmd = "py"; Args = @("-3", "--version") },
-        @{ Cmd = "python"; Args = @("--version") }
+    $launcherCandidates = @(
+        @{ Cmd = 'py'; VersionArgs = @('-3.12', '--version'); PyArgs = @('-3.12') },
+        @{ Cmd = 'py'; VersionArgs = @('-3.11', '--version'); PyArgs = @('-3.11') },
+        @{ Cmd = 'py'; VersionArgs = @('-3.10', '--version'); PyArgs = @('-3.10') },
+        @{ Cmd = 'py'; VersionArgs = @('-3', '--version'); PyArgs = @('-3') },
+        @{ Cmd = 'python'; VersionArgs = @('--version'); PyArgs = @() }
     )
 
-    foreach ($c in $candidates) {
+    $fallback = $null
+
+    foreach ($c in $launcherCandidates) {
         try {
-            $output = @(& $c.Cmd @($c.Args) 2>&1 | ForEach-Object { "$_" })
-            if ($LASTEXITCODE -eq 0 -and (Test-RealPythonVersionOutput -OutputLines $output)) {
-                if ($c.Cmd -eq "py") {
-                    return @{ Launcher = "py"; PipArgs = @("-3", "-m", "pip"); PyArgs = @("-3") }
-                }
-                return @{ Launcher = "python"; PipArgs = @("-m", "pip"); PyArgs = @() }
+            $output = @(& $c.Cmd @($c.VersionArgs) 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0 -or -not (Test-RealPythonVersionOutput -OutputLines $output)) {
+                continue
+            }
+            $handle = New-PythonHandleFromLauncherCandidate -Cmd $c.Cmd -PyArgs $c.PyArgs -VersionOutput $output
+            $ver = Get-PythonVersionFromOutput -OutputLines $output
+            if (Test-PythonVersionInSupportedRange -Version $ver) {
+                return $handle
+            }
+            if ($null -eq $fallback) {
+                $fallback = $handle
             }
         }
         catch {
@@ -128,7 +209,63 @@ function Find-PythonExecutable {
         }
     }
 
-    return Find-PythonOnDisk
+    $onDisk = Find-PythonOnDisk
+    if ($null -ne $onDisk) {
+        return $onDisk
+    }
+
+    return $fallback
+}
+
+function Test-PythonVersionSupported {
+    param([hashtable]$Python)
+
+    $output = @(Invoke-Python -Python $Python -ScriptArgs @('--version') 2>&1 | ForEach-Object { "$_" })
+    $ver = Get-PythonVersionFromOutput -OutputLines $output
+    $display = ($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($display) -and $null -ne $ver) {
+        $display = "Python $($ver.Major).$($ver.Minor).$($ver.Patch)"
+    }
+
+    if ($null -eq $ver) {
+        Write-Warn "Could not parse Python version from: $($output -join ' ')"
+        return
+    }
+
+    Write-Ok ('Found Python: ' + $display)
+
+    if (Test-PythonVersionInSupportedRange -Version $ver) {
+        Write-Ok "Python $($ver.Major).$($ver.Minor) is supported (BusyLight targets 3.$($script:PythonMinorMin)–3.$($script:PythonMinorMax))."
+        return
+    }
+
+    if ($ver.Minor -ge 13) {
+        Write-Host ""
+        Write-Host "    WARNING: Python $($ver.Major).$($ver.Minor).$($ver.Patch) is not supported yet." -ForegroundColor Yellow
+        Write-Host "    Packages such as pycaw may fail to install on Python 3.13+ (no wheels)." -ForegroundColor Yellow
+        Write-Host "    Recommended: install Python 3.12 from python.org or use: py -3.12" -ForegroundColor Yellow
+        Write-Host ""
+        $reply = Read-Host 'Continue with this Python anyway? (y/N)'
+        if ($reply -notmatch '^[Yy]') {
+            Write-Host ""
+            Write-Host "Install Python 3.12 and run this installer again." -ForegroundColor Yellow
+            Write-Host "  winget install -e --id Python.Python.3.12" -ForegroundColor DarkGray
+            Write-Host "  py -3.12   (if Python 3.12 is already installed)" -ForegroundColor DarkGray
+            exit 1
+        }
+        Write-Warn "Continuing with unsupported Python $($ver.Major).$($ver.Minor).$($ver.Patch)"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "    WARNING: Python $($ver.Major).$($ver.Minor).$($ver.Patch) is below the minimum (3.$($script:PythonMinorMin))." -ForegroundColor Yellow
+    Write-Host "    Install Python 3.12 from python.org or use: py -3.12" -ForegroundColor Yellow
+    Write-Host ""
+    $reply = Read-Host 'Continue anyway? (y/N)'
+    if ($reply -notmatch '^[Yy]') {
+        exit 1
+    }
+    Write-Warn "Continuing with Python $($ver.Major).$($ver.Minor).$($ver.Patch)"
 }
 
 function Test-WingetInstallSuccessOutput {
@@ -255,7 +392,7 @@ function Install-PythonFromPythonOrg {
 
 function Show-ManualPythonInstructions {
     Write-Host ""
-    Write-Host "Please install Python 3.7 or newer from:" -ForegroundColor Yellow
+    Write-Host "Please install Python 3.12 (supported: 3.10–3.12) from:" -ForegroundColor Yellow
     Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
@@ -387,6 +524,14 @@ function Invoke-Pip {
     )
     $result = Invoke-PipInternal -Python $Python -PipSubArgs $PipSubArgs
     if ($result.ExitCode -ne 0) {
+        if ($null -ne $result.Output -and $result.Output.Count -gt 0) {
+            Write-Host ""
+            Write-Host "    pip output:" -ForegroundColor Yellow
+            foreach ($line in $result.Output) {
+                Write-Host "    $line" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+        }
         $cmd = 'pip ' + ($PipSubArgs -join ' ')
         throw "$cmd failed with exit code $($result.ExitCode)."
     }
@@ -528,10 +673,9 @@ function Install-Requirements {
         return
     }
 
-    Write-Step "Installing: $($toInstall -join ', ')"
-    Invoke-Pip -Python $Python -PipSubArgs @("install", $toInstall)
-    if ($LASTEXITCODE -ne 0) {
-        throw "One or more package installations failed."
+    foreach ($spec in $toInstall) {
+        Write-Step "Installing: $spec"
+        Invoke-Pip -Python $Python -PipSubArgs @("install", $spec)
     }
     Write-Ok "Package installation complete"
 }
@@ -545,7 +689,7 @@ Write-Host "============================================================" -Foreg
 $repoRoot = Get-RepoRoot
 $requirementsFile = Join-Path $repoRoot "requirements.txt"
 
-Write-Step "Looking for Python (py -3 or python)..."
+Write-Step "Looking for Python (prefers py -3.12, then 3.11, 3.10, py -3, python)..."
 $python = Find-PythonExecutable
 
 if ($null -eq $python) {
@@ -612,8 +756,7 @@ if ($null -eq $python) {
     }
 }
 
-$versionOut = Invoke-Python -Python $python -ScriptArgs @("--version")
-Write-Ok ('Found Python: ' + ($versionOut -join ' '))
+Test-PythonVersionSupported -Python $python
 
 Write-Step "Checking pip..."
 Update-PipIfNeeded -Python $python
