@@ -32,12 +32,33 @@ function Get-ConfigValue {
 function Get-ConnectedWifiSsid {
     try {
         $output = @(netsh wlan show interfaces 2>&1 | ForEach-Object { "$_" })
-        $text = $output -join "`n"
-        if ($text -notmatch '(?is)State\s*:\s*connected') {
-            return $null
+        $sections = New-Object 'System.Collections.Generic.List[object]'
+        $current = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($line in $output) {
+            if ($line -match '^\s*Name\s*:') {
+                if ($current.Count -gt 0) {
+                    [void]$sections.Add($current.ToArray())
+                    $current = New-Object 'System.Collections.Generic.List[string]'
+                }
+            }
+            [void]$current.Add($line)
         }
-        if ($text -match '(?im)^\s*SSID\s*:\s*(.+)$') {
-            return $Matches[1].Trim()
+        if ($current.Count -gt 0) {
+            [void]$sections.Add($current.ToArray())
+        }
+        foreach ($sec in $sections) {
+            $text = ($sec -join "`n")
+            if ($text -notmatch '(?im)^\s*State\s*:\s*connected\s*$') {
+                continue
+            }
+            if ($text -match '(?im)^\s*Network name \(SSID\)\s*:\s*(.+)$') {
+                $ssid = $Matches[1].Trim()
+                if ($ssid) { return $ssid }
+            }
+            if ($text -match '(?im)^\s*SSID\s*:\s*(.+)$') {
+                $ssid = $Matches[1].Trim()
+                if ($ssid) { return $ssid }
+            }
         }
     }
     catch {
@@ -90,8 +111,12 @@ if ([string]::IsNullOrWhiteSpace($homeSsid)) {
 }
 
 $currentSsid = Get-ConnectedWifiSsid
-if ($currentSsid -ne $homeSsid) {
-    Write-Host "Not on home Wi-Fi (expected '$homeSsid', current '$currentSsid'). Not starting BusyLight." -ForegroundColor Yellow
+$ssidMatches = $false
+if ($null -ne $currentSsid) {
+    $ssidMatches = ($currentSsid.Trim().ToLowerInvariant() -eq $homeSsid.Trim().ToLowerInvariant())
+}
+if (-not $ssidMatches) {
+    Write-Host "Not on home Wi-Fi (expected '$homeSsid', detected '$currentSsid'). Not starting BusyLight." -ForegroundColor Yellow
     exit 0
 }
 

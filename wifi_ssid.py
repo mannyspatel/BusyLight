@@ -2,10 +2,32 @@
 
 from __future__ import annotations
 
+import locale
 import re
 import subprocess
 import sys
-from typing import Optional
+from typing import List, Optional
+
+
+def _decode_subprocess_output(data: bytes) -> str:
+    if not data:
+        return ""
+    encodings: List[str] = []
+    try:
+        enc = locale.getpreferredencoding(False)
+        if enc:
+            encodings.append(enc)
+    except (OSError, ValueError):
+        pass
+    for enc in ("cp1252", "cp850", "utf-8"):
+        if enc not in encodings:
+            encodings.append(enc)
+    for enc in encodings:
+        try:
+            return data.decode(enc, errors="replace")
+        except LookupError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def parse_netsh_wlan_interfaces(output: str) -> Optional[str]:
@@ -17,15 +39,35 @@ def parse_netsh_wlan_interfaces(output: str) -> Optional[str]:
     if not output.strip():
         return None
 
-    blocks = re.split(r"\r?\n\s*\r?\n", output.strip())
-    for block in blocks:
-        if not re.search(r"(?im)^\s*State\s*:\s*connected", block):
+    sections: List[List[str]] = []
+    current: List[str] = []
+
+    for line in output.splitlines():
+        if re.match(r"^\s*Name\s*:", line, re.IGNORECASE):
+            if current:
+                sections.append(current)
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append(current)
+
+    if not sections:
+        sections = [output.splitlines()]
+
+    for section in sections:
+        block = "\n".join(section)
+        if not re.search(r"(?im)^\s*State\s*:\s*connected\s*$", block):
             continue
-        match = re.search(r"(?im)^\s*SSID\s*:\s*(.+)$", block)
-        if match:
-            ssid = match.group(1).strip()
-            if ssid:
-                return ssid
+        for pattern in (
+            r"(?im)^\s*Network name \(SSID\)\s*:\s*(.+)$",
+            r"(?im)^\s*SSID\s*:\s*(.+)$",
+        ):
+            match = re.search(pattern, block)
+            if match:
+                ssid = match.group(1).strip()
+                if ssid:
+                    return ssid
     return None
 
 
@@ -38,14 +80,15 @@ def get_connected_wifi_ssid() -> Optional[str]:
         completed = subprocess.run(
             ["netsh", "wlan", "show", "interfaces"],
             capture_output=True,
-            text=True,
             timeout=10,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
 
-    text = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    text = _decode_subprocess_output(completed.stdout or b"")
+    if completed.stderr:
+        text += "\n" + _decode_subprocess_output(completed.stderr)
     return parse_netsh_wlan_interfaces(text)
 
 
@@ -56,4 +99,4 @@ def is_on_home_wifi(home_ssid: str) -> bool:
     current = get_connected_wifi_ssid()
     if current is None:
         return False
-    return current == home_ssid
+    return current.strip().casefold() == home_ssid.strip().casefold()
