@@ -12,6 +12,10 @@ A Python application that monitors video-call status (Teams, Zoom, Webex, and ot
 - **Color-Coded Status**: Visual indicators for different call states
 - **No Admin Rights Required**: Works on restricted corporate laptops without elevated privileges
 - **Hostname Support**: Uses mDNS hostname instead of IP for reliability
+- **YAML configuration**: `config.yaml` for WLED host, home Wi-Fi, allowlist, and tunables
+- **Home Wi-Fi guard**: Exits cleanly (WLED off) when SSID does not match home network
+- **System tray** (Windows): Tray icon color matches current busy-state color
+- **Task Scheduler kit**: Importable XML plus PowerShell start/stop scripts
 - **Low Resource Usage**: Minimal CPU and memory footprint (~0.3-0.5% CPU)
 
 ## Status Indicators
@@ -52,7 +56,7 @@ If `python --version` shows **3.13, 3.14, or 3.15**, install [Python 3.12](https
 
 If both winget and the automatic python.org step fail, install Python manually from [python.org](https://www.python.org/downloads/), not the Microsoft Store shortcut—then run the installer again. If Windows still says Python is missing after you install, open **Settings → Apps → Advanced app settings → App execution aliases** and turn off the **python.exe** / **python3.exe** stubs so the real interpreter is used.
 
-When setup finishes, run the controller (see [Running the Script](#running-the-script)).
+When setup finishes, copy `config.yaml.example` to `config.yaml`, edit it, then run BusyLight (see [Running BusyLight](#running-busylight)).
 
 ### 1. Install Python
 
@@ -69,105 +73,79 @@ pip install -r requirements.txt
 Or install packages individually:
 
 ```bash
-pip install requests comtypes pycaw
+pip install -r requirements.txt
 ```
 
-### 3. Download the Script
+### 3. Configure `config.yaml`
 
-Save the `teams_light_controller.py` file to a location on your computer (e.g., `C:\Scripts\` or your Documents folder).
+Copy the example file and edit settings (local `config.yaml` is gitignored):
 
-### 4. Configure the Script
-
-Open `teams_light_controller.py` in a text editor and verify/update these settings:
-
-```python
-WLED_IP = "wled-busylight.lan"  # Your WLED device hostname
-CHECK_INTERVAL = 1.5              # Seconds between checks
-BRIGHTNESS = 128                  # Light brightness (0-255)
-EFFECT_SPEED = 128                # Animation speed (0-255)
+```bash
+copy config.yaml.example config.yaml
 ```
 
-### Meeting app allowlist (optional)
+Minimum settings:
 
-By default the script watches common meeting apps only (reduces false positives from random mic/camera access):
-
-```python
-APP_ALLOWLIST = [
-    "teams",
-    "ms-teams",
-    "zoom",
-    "webex",
-    "ringcentral",
-    "skype",
-]
+```yaml
+wled_host: wled-busylight.lan
+home_wifi_ssid: YourHomeWiFi
+app_allowlist:
+  - teams
+  - zoom
 ```
 
-Matching is **case-insensitive** and uses **substring** checks against each app's ConsentStore registry path (including `NonPackaged` entries such as `Zoom.exe`).
+See `config.yaml.example` for optional tunables (intervals, colors, brightness, debug).
 
-**Zoom example:** No extra setup is needed if `"zoom"` stays in the list. Join a Zoom call; when Zoom uses your mic or camera, the light leaves the green "not in call" state.
+### Meeting app allowlist
 
-**Detect any app:** Set `APP_ALLOWLIST = []` or `APP_ALLOWLIST = None` to treat every application that holds the mic or camera as "in a call" (useful for custom clients; may react to browsers or system apps).
+By default the controller watches common meeting apps only. Matching is **case-insensitive substring** checks against each app's ConsentStore registry path.
 
-## Running the Script
+- **Add apps**: See [docs/allowlist.md](docs/allowlist.md) for how to find ConsentStore paths and add substrings to `app_allowlist`.
+- **Detect any app**: Set `app_allowlist: []` to treat every mic/camera client as "in a call" (more false positives).
 
-### One-Time Test
+## Running BusyLight
 
-Open Command Prompt in the script's directory and run:
+### Launcher (recommended on Windows)
+
+```bash
+python busylight.py
+```
+
+On Windows, **tray mode is on by default**: a system tray icon shows the current status color; use the menu for status text or **Exit** (turns WLED off).
+
+- Console only: `python busylight.py --no-tray`
+- Legacy entry point: `python teams_light_controller.py` (no tray; loads `config.yaml`)
+
+### One-time console test
 
 ```bash
 python teams_light_controller.py
 ```
 
-You should see output like:
-```
-============================================================
-Teams Status Light Controller
-============================================================
-WLED Host: wled-busylight.lan
-Check interval: 1.5s
+Press `Ctrl+C` to stop; WLED turns off on exit.
 
-Testing WLED connection...
-✓ WLED connection successful (light should be GREEN)
+### Start / stop scripts (PowerShell)
 
-Monitoring started. Press Ctrl+C to stop.
+```powershell
+.\scripts\run-busylight.ps1    # checks home SSID, single-instance pythonw launch
+.\scripts\stop-busylight.ps1   # stops pythonw busylight.py
 ```
 
-Press `Ctrl+C` to stop the script.
+Optional Task Scheduler wrapper: `scripts/run-busylight.cmd`
 
-### Run on Windows Startup (No Window)
+### Run on Windows logon (Task Scheduler)
 
-#### Option 1: Using VBScript (Simplest)
+1. Import `tasks/BusyLight-HomeWiFi-Logon.xml` in Task Scheduler.
+2. Replace `REPLACE_WITH_REPO` and `REPLACE_WITH_WINDOWS_NETWORK_PROFILE_NAME` (see [docs/task-scheduler.md](docs/task-scheduler.md)).
+3. The task starts `scripts/run-busylight.ps1`, which verifies Wi-Fi before launch.
 
-1. Create a file called `start_teams_light.vbs` with this content:
-   ```vbscript
-   Set objShell = CreateObject("WScript.Shell")
-   objShell.Run "pythonw C:\path\to\teams_light_controller.py", 0, False
-   ```
-   Replace `C:\path\to\` with the actual path to your script.
-
-2. Place this `.vbs` file in your Windows Startup folder:
-   - Press `Win+R`, type `shell:startup`, press Enter
-   - Copy the `.vbs` file into this folder
-
-3. Restart your computer - the script will start automatically with no window
-
-#### Option 2: Using Task Scheduler (More Reliable)
-
-1. Open **Task Scheduler** (search in Start menu)
-2. Click **Create Basic Task** on the right
-3. Set up as follows:
-   - **Name**: Teams Status Light
-   - **Trigger**: "When I log on"
-   - **Action**: "Start a program"
-   - **Program**: `C:\Users\YourUsername\AppData\Local\Programs\Python\Python3XX\pythonw.exe`
-   - **Arguments**: `C:\path\to\teams_light_controller.py`
-4. Finish and restart your computer
+When you disconnect from home Wi-Fi, the controller turns WLED off and exits on the next status check (no extra Wi-Fi timer).
 
 ## Troubleshooting
 
 ### WLED Connection Failed
 
-- **Check hostname**: Make sure `wled-busylight.lan` matches your WLED device's name
+- **Check hostname**: Make sure `wled_host` in `config.yaml` matches your WLED device
 - **Check network**: Ensure your WLED device is on the same network as your laptop
 - **Find WLED hostname**: 
   - Open your WLED web interface (via IP address in your browser)
@@ -200,7 +178,7 @@ The script uses Windows Core Audio API to check the system-level mute state, whi
 - **Check Python path**: Make sure Python is in your PATH
   - Open Command Prompt and type `python --version` - if it works, Python is in your PATH
   
-- **Run in debug mode**: Change `DEBUG_MODE = True` in the script to see detailed output
+- **Run in debug mode**: Set `debug: true` in `config.yaml` to see detailed output
   
 - **Check for error log**: Run the script manually to see any error messages
 
@@ -225,10 +203,8 @@ This is the best solution because it works even if the Python script crashes or 
 
 The script has an `IDLE_TIMEOUT` setting that will turn off the light if no successful updates are sent for a specified period:
 
-1. Open `teams_light_controller.py` in a text editor
-2. Find the line: `IDLE_TIMEOUT = 600  # Seconds - turn off light if no successful updates for this long (0 = disabled)`
-3. Set it to your desired timeout in seconds (e.g., `600` for 10 minutes, `0` to disable)
-4. Save and restart the script
+1. Edit `idle_timeout` in `config.yaml` (seconds; `0` disables)
+2. Save and restart BusyLight
 
 **Note**: This only works while the script is running. If your computer sleeps, the script also pauses.
 
@@ -244,30 +220,16 @@ Press `Ctrl+C`
 The script will automatically turn the WLED light completely off when it stops.
 
 ### If Running Hidden/at Startup
-1. Open Task Manager (`Ctrl+Shift+Esc`)
-2. Go to the **Details** tab
-3. Find `pythonw.exe`
-4. Right-click and select **End Task**
 
-The script will automatically turn the WLED light completely off when it exits, even if terminated unexpectedly.
+Run `scripts/stop-busylight.ps1`, use **Exit** on the tray icon, or end `pythonw.exe` running `busylight.py` in Task Manager.
+
+BusyLight turns WLED off on normal exit; forced kill may leave the light on until the next WLED idle timeout.
 
 ## Customization
 
 ### Change Colors
 
-Edit the `COLORS` dictionary in the script:
-
-```python
-COLORS = {
-    'off': (0, 255, 0),                  # Green - not in a call
-    'in_call_muted': (255, 200, 0),     # Orange - in call, mic muted
-    'in_call_quiet': (255, 255, 0),     # Yellow - in call, unmuted but quiet
-    'mic_only': (255, 255, 0),          # Yellow - speaking
-    'camera_only': (255, 100, 0),       # Dark orange - camera on, mic muted
-    'camera_quiet': (255, 0, 0),        # Red - camera on, unmuted but quiet
-    'camera_and_mic': (255, 0, 0),      # Red - camera on and speaking
-}
-```
+Override the `colors` section in `config.yaml` (RGB lists 0-255 per state). Omitted keys keep defaults from `config.yaml.example`.
 
 RGB values range from 0-255. Some examples:
 - White: `(255, 255, 255)`
@@ -277,19 +239,7 @@ RGB values range from 0-255. Some examples:
 
 ### Change Effects
 
-Edit the `STATE_EFFECTS` dictionary to change animations:
-
-```python
-STATE_EFFECTS = {
-    'off': 'solid',
-    'in_call_muted': 'solid',
-    'in_call_quiet': 'solid',
-    'mic_only': 'breathe',              # Change to 'blink', 'sweep', etc.
-    'camera_only': 'solid',
-    'camera_quiet': 'solid',
-    'camera_and_mic': 'breathe',         # Change to 'blink', 'sweep', etc.
-}
-```
+Set `state_effects` in `config.yaml` (effect names such as `solid`, `breathe`, `blink`).
 
 Available effects:
 - `'solid'` - No animation
@@ -303,16 +253,13 @@ Available effects:
 
 Change these values to fine-tune behavior:
 
-```python
-AUDIO_THRESHOLD = 0.001          # Lower = more sensitive (picks up quieter sounds)
-AUDIO_DETECTION_WINDOW = 2       # Seconds to keep "talking" state after sound stops
-```
+Use `audio_threshold` and `audio_detection_window` in `config.yaml`.
 
 ## Technical Details
 
 ### How It Works
 
-1. **Registry Monitoring**: Recursively walks `HKCU\...\CapabilityAccessManager\ConsentStore\{microphone|webcam}` (including `NonPackaged` paths). When `LastUsedTimeStop` is `0`, Windows considers that app still using the device. Optional `APP_ALLOWLIST` filters which apps count.
+1. **Registry Monitoring**: Recursively walks `HKCU\...\CapabilityAccessManager\ConsentStore\{microphone|webcam}` (including `NonPackaged` paths). When `LastUsedTimeStop` is `0`, Windows considers that app still using the device. `app_allowlist` in config filters which apps count.
 2. **Mute Detection**: Uses Windows Core Audio API (IAudioEndpointVolume) to detect if microphone is muted at system level
 3. **Audio Detection**: Uses Windows Core Audio API (IAudioMeterInformation) to monitor if sound is being transmitted
 4. **WLED Communication**: Sends commands to your WLED device via HTTP JSON API
@@ -332,10 +279,21 @@ It does not require admin privileges to run and works on Windows 11 with standar
 
 If you encounter issues:
 
-1. **Enable Debug Mode**: Set `DEBUG_MODE = True` in the script and run it to see detailed output
+1. **Enable Debug Mode**: Set `debug: true` in `config.yaml`
 2. **Check logs**: Look for error messages in the console output
 3. **Test WLED**: Make sure you can access your WLED web interface
-4. **Verify your meeting app**: Make sure the app is allowed in `APP_ALLOWLIST` (if configured) and is using the devices
+4. **Verify your meeting app**: Make sure the app is listed in `app_allowlist` and is using the devices
+
+## Testing (CI / Linux)
+
+Pure-Python helpers run on Linux in CI:
+
+```bash
+pip install pyyaml
+python -m unittest discover -s tests -v
+```
+
+Not covered on Linux: system tray (`pystray`), Windows registry/audio (`pycaw`), and live Wi-Fi (`netsh`).
 
 ## License
 
@@ -343,6 +301,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
+- **1.2** - YAML config, home Wi-Fi exit, system tray launcher (`busylight.py`), Task Scheduler scripts, and unit tests
 - **1.1** - Added connection reliability improvements:
   - Keep-alive mechanism to prevent WLED connection timeouts
   - Connection pooling with requests Session for better reliability

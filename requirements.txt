@@ -1,4 +1,7 @@
 requests>=2.25.0
 comtypes>=1.1.0
 pycaw>=20230407
+pyyaml>=6.0.1
+pystray>=0.19.5
+Pillow>=10.0.0
 

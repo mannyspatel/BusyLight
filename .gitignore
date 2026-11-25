@@ -119,6 +119,9 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Local BusyLight settings (use config.yaml.example as template)
+config.yaml
+
 # Environments
 .env
 .venv
