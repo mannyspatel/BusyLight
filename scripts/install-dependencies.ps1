@@ -10,7 +10,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
-$script:InstallerVersion = '1.3'
+$script:InstallerVersion = '1.4'
 
 function Write-Step {
     param([string]$Message)
@@ -193,6 +193,66 @@ function Refresh-SessionPythonPath {
     Add-PythonPathEntries -Directories ($candidates | Select-Object -Unique)
 }
 
+function Install-PythonFromPythonOrg {
+    param(
+        [string]$Version = '3.12.8'
+    )
+
+    $fileName = "python-$Version-amd64.exe"
+    # SECURITY-REVIEW: Fixed official python.org FTP URL for the installer binary.
+    $url = "https://www.python.org/ftp/python/$Version/$fileName"
+    $installerPath = Join-Path $env:TEMP $fileName
+
+    Write-Step "Downloading Python $Version from python.org..."
+    Write-Warn "Network access is required for this step."
+
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $installerPath -UseBasicParsing
+        if (-not (Test-Path -LiteralPath $installerPath)) {
+            Write-Warn "Download did not produce an installer file."
+            return $false
+        }
+    }
+    catch {
+        Write-Warn "Could not download Python installer: $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+
+    Write-Step "Installing Python $Version (per-user, Prepends PATH)..."
+    $installArgs = @(
+        '/quiet',
+        'InstallAllUsers=0',
+        'PrependPath=1',
+        'Include_test=0'
+    )
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+        $ok = ($proc.ExitCode -eq 0)
+        if (-not $ok) {
+            Write-Warn "Python installer exited with code $($proc.ExitCode)."
+        }
+        return $ok
+    }
+    catch {
+        Write-Warn "Python installer failed: $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+        if (Test-Path -LiteralPath $installerPath) {
+            Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Show-ManualPythonInstructions {
     Write-Host ""
     Write-Host "Please install Python 3.7 or newer from:" -ForegroundColor Yellow
@@ -291,20 +351,46 @@ function Invoke-Python {
     }
 }
 
+function Invoke-PipInternal {
+    param(
+        [hashtable]$Python,
+        [string[]]$PipSubArgs
+    )
+    # pip writes package-missing warnings to stderr; with $ErrorActionPreference Stop
+    # that becomes NativeCommandError. Continue + merged streams avoids false failures.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($Python.Launcher -eq 'exe') {
+            $output = @( & $Python.Exe -m pip @PipSubArgs 2>&1 | ForEach-Object { "$_" })
+        }
+        elseif ($Python.Launcher -eq "py") {
+            $output = @( & py @($Python.PyArgs + @("-m", "pip") + $PipSubArgs) 2>&1 | ForEach-Object { "$_" })
+        }
+        else {
+            $output = @( & python -m pip @PipSubArgs 2>&1 | ForEach-Object { "$_" })
+        }
+        return @{
+            Output   = $output
+            ExitCode = $LASTEXITCODE
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Invoke-Pip {
     param(
         [hashtable]$Python,
         [string[]]$PipSubArgs
     )
-    if ($Python.Launcher -eq 'exe') {
-        & $Python.Exe -m pip @PipSubArgs
+    $result = Invoke-PipInternal -Python $Python -PipSubArgs $PipSubArgs
+    if ($result.ExitCode -ne 0) {
+        $cmd = 'pip ' + ($PipSubArgs -join ' ')
+        throw "$cmd failed with exit code $($result.ExitCode)."
     }
-    elseif ($Python.Launcher -eq "py") {
-        & py @($Python.PyArgs + @("-m", "pip") + $PipSubArgs)
-    }
-    else {
-        & python -m pip @PipSubArgs
-    }
+    return $result.Output
 }
 
 function Get-InstalledPackageVersion {
@@ -312,9 +398,9 @@ function Get-InstalledPackageVersion {
         [hashtable]$Python,
         [string]$PackageName
     )
-    $lines = Invoke-Pip -Python $Python -PipSubArgs @("show", $PackageName) 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
-    foreach ($line in $lines) {
+    $result = Invoke-PipInternal -Python $Python -PipSubArgs @("show", $PackageName)
+    if ($result.ExitCode -ne 0) { return $null }
+    foreach ($line in $result.Output) {
         if ($line -match "^Version:\s*(.+)$") {
             return $Matches[1].Trim()
         }
@@ -368,13 +454,8 @@ function Parse-RequirementLine {
 
 function Test-PipUsable {
     param([hashtable]$Python)
-    try {
-        Invoke-Pip -Python $Python -PipSubArgs @("--version") | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    }
-    catch {
-        return $false
-    }
+    $result = Invoke-PipInternal -Python $Python -PipSubArgs @("--version")
+    return ($result.ExitCode -eq 0)
 }
 
 function Update-PipIfNeeded {
@@ -387,7 +468,8 @@ function Update-PipIfNeeded {
         }
     }
 
-    $pipVersionLine = (Invoke-Pip -Python $Python -PipSubArgs @("--version") | Select-Object -First 1)
+    $pipVersionResult = Invoke-PipInternal -Python $Python -PipSubArgs @("--version")
+    $pipVersionLine = ($pipVersionResult.Output | Select-Object -First 1)
     if ($pipVersionLine -match "pip (\d+)\.(\d+)") {
         $major = [int]$Matches[1]
         $minor = [int]$Matches[2]
@@ -494,6 +576,29 @@ if ($null -eq $python) {
         }
         else {
             Write-Warn "Skipped automatic Python install via winget."
+        }
+    }
+
+    if ($null -eq $python) {
+        Write-Host ""
+        $orgReply = Read-Host 'Download and install Python 3.12 from python.org now? (Y/n)'
+        if (Test-WingetInstallYes -Reply $orgReply) {
+            $orgInstalled = Install-PythonFromPythonOrg
+            if ($orgInstalled) {
+                Write-Ok "python.org installer finished"
+                Import-UserPathFromRegistry
+                Refresh-SessionPythonPath
+                Start-Sleep -Seconds 3
+                Write-Step "Looking for Python after python.org install..."
+                $python = Find-PythonExecutable
+            }
+            else {
+                Write-Host ""
+                Write-Host "Could not download or run the python.org installer (network, policy, or permissions)." -ForegroundColor Red
+            }
+        }
+        else {
+            Write-Warn "Skipped automatic Python install from python.org."
         }
     }
 
