@@ -1,19 +1,19 @@
 # Task Scheduler setup
 
-BusyLight starts with **`pythonw.exe`** and **`busylight.py`** (no console window, tray icon on by default). The imported task XML uses those directly—not PowerShell—so logon startup works even when execution policy blocks scripts.
+**Recommended path:** import a task XML that runs **`pythonw.exe`** with argument **`busylight.py`** and **Start in** set to the repo folder. That is the only launcher Task Scheduler needs; no PowerShell wrapper is required for logon startup (execution policy cannot block it).
 
 `teams_light_controller.py` is a **library module** (`TeamsMonitor`); do not point Task Scheduler at it.
 
-For optional SSID pre-checks, single-instance locking, or logging before launch, use **`scripts/run-busylight.ps1`** manually (not the default in the XML templates).
+**Home Wi-Fi gating** is the task **Conditions → Network** entry (“Start only if the following network connection is available”). BusyLight does **not** poll Wi-Fi, watch SSID changes, or exit the monitor loop when you leave home.
 
-**Home Wi-Fi is enforced only by Task Scheduler** (the **Network** condition on the logon task). BusyLight does **not** run `netsh` or exit when you disconnect from home Wi-Fi while it is running.
+Optional: **`scripts/run-busylight.ps1`** adds a launch-time SSID pre-check (inline `netsh`, not Python), single-instance locking, and extra logging. The XML templates do **not** use it by default.
 
 ## 1. Configure `config.yaml`
 
 Copy `config.yaml.example` to `config.yaml` and set:
 
 - `wled_host` - hostname or IP of your WLED device
-- `home_wifi_ssid` - optional; keeps docs aligned with your home network and enables an optional pre-check in `run-busylight.ps1` (unused by the Python monitor)
+- `home_wifi_ssid` - **optional for Task Scheduler-only users** (placeholder `YourHomeWiFi` or empty is fine); required only if you want `run-busylight.ps1` to verify SSID before launch
 
 ## 2. Find `pythonw.exe`
 
@@ -31,7 +31,7 @@ Task Scheduler uses the **saved Windows network profile name**, which is usually
 2. Select your home network and note the profile name
 3. Set that name in the imported task **Conditions** -> **Start only if the following network connection is available**
 
-You can set `home_wifi_ssid` in `config.yaml` to the same name for your own reference (and for optional `run-busylight.ps1` pre-checks).
+Scheduler-only: you can skip editing `home_wifi_ssid` and rely on the task **Network** condition alone. If you use `run-busylight.ps1`, set `home_wifi_ssid` to the SSID reported by `netsh wlan show interfaces` (may differ from the Windows profile name above).
 
 ## 4. Import the task XML
 
