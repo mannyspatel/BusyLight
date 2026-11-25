@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Start BusyLight at user logon when the home network profile is available. Edit Network Name and script paths before import (see docs/task-scheduler.md).</Description>
+    <Description>Start BusyLight at user logon when the home network profile is available. Edit pythonw path, repo folder, and network profile name before import (see docs/task-scheduler.md).</Description>
     <URI>\BusyLight\BusyLight-HomeWiFi-Logon</URI>
   </RegistrationInfo>
   <Triggers>
@@ -41,8 +41,8 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>powershell.exe</Command>
-      <Arguments>-NoProfile -ExecutionPolicy Bypass -File "REPLACE_WITH_REPO\scripts\run-busylight.ps1"</Arguments>
+      <Command>REPLACE_WITH_PYTHONW</Command>
+      <Arguments>busylight.py</Arguments>
       <WorkingDirectory>REPLACE_WITH_REPO</WorkingDirectory>
     </Exec>
   </Actions>
