@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from busylight_config import BusyLightConfig, load_config
-from wifi_ssid import get_connected_wifi_ssid, is_on_home_wifi
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IAudioEndpointVolume, ISimpleAudioVolume
@@ -586,14 +585,13 @@ class TeamsMonitor:
         self,
         stop_event: Optional[threading.Event] = None,
     ) -> None:
-        """Main monitoring loop. Stops when stop_event is set or home Wi-Fi is lost."""
+        """Main monitoring loop. Stops when stop_event is set."""
         interval = self.config.check_interval
         print("=" * 60)
         print("Teams Status Light Controller with Audio Monitoring")
         print(f"Version {__version__}")
         print("=" * 60)
         print(f"WLED host: {self.wled_host}")
-        print(f"Home Wi-Fi: {self.config.home_wifi_ssid}")
         print(f"Check interval: {interval}s")
         print(f"Audio threshold: {self.config.audio_threshold}")
         print(f"Audio detection window: {self.config.audio_detection_window}s")
@@ -618,16 +616,6 @@ class TeamsMonitor:
         try:
             while True:
                 if stop_event and stop_event.is_set():
-                    break
-
-                if not is_on_home_wifi(self.config.home_wifi_ssid):
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    current = get_connected_wifi_ssid()
-                    print(
-                        f"[{timestamp}] Not on home Wi-Fi "
-                        f"(expected {self.config.home_wifi_ssid!r}, current={current!r}) - shutting down"
-                    )
-                    self.turn_off_wled()
                     break
 
                 current_time = time.time()

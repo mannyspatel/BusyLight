@@ -1,7 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Start BusyLight (single instance) when on home Wi-Fi.
+  Start BusyLight (single instance) via pythonw.
+
+.DESCRIPTION
+  Home Wi-Fi is normally enforced by Task Scheduler ("Start only if the following
+  network connection is available" on the imported XML). BusyLight does not poll Wi-Fi
+  while running.
+
+  If home_wifi_ssid is set in config.yaml, this script optionally verifies the current
+  SSID before launch (skipped when home_wifi_ssid is empty or placeholder).
 #>
 
 $ErrorActionPreference = "Stop"
@@ -105,19 +113,17 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 }
 
 $homeSsid = Get-ConfigValue -ConfigPath $configPath -Key 'home_wifi_ssid'
-if ([string]::IsNullOrWhiteSpace($homeSsid)) {
-    Write-Host "home_wifi_ssid is not set in config.yaml." -ForegroundColor Red
-    exit 1
-}
-
-$currentSsid = Get-ConnectedWifiSsid
-$ssidMatches = $false
-if ($null -ne $currentSsid) {
-    $ssidMatches = ($currentSsid.Trim().ToLowerInvariant() -eq $homeSsid.Trim().ToLowerInvariant())
-}
-if (-not $ssidMatches) {
-    Write-Host "Not on home Wi-Fi (expected '$homeSsid', detected '$currentSsid'). Not starting BusyLight." -ForegroundColor Yellow
-    exit 0
+$skipSsidGate = [string]::IsNullOrWhiteSpace($homeSsid) -or ($homeSsid -eq 'YourHomeWiFi')
+if (-not $skipSsidGate) {
+    $currentSsid = Get-ConnectedWifiSsid
+    $ssidMatches = $false
+    if ($null -ne $currentSsid) {
+        $ssidMatches = ($currentSsid.Trim().ToLowerInvariant() -eq $homeSsid.Trim().ToLowerInvariant())
+    }
+    if (-not $ssidMatches) {
+        Write-Host "Not on home Wi-Fi (expected '$homeSsid', detected '$currentSsid'). Not starting BusyLight." -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 $pythonw = Find-Pythonw

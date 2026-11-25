@@ -12,8 +12,8 @@ A Python application that monitors video-call status (Teams, Zoom, Webex, and ot
 - **Color-Coded Status**: Visual indicators for different call states
 - **No Admin Rights Required**: Works on restricted corporate laptops without elevated privileges
 - **Hostname Support**: Uses mDNS hostname instead of IP for reliability
-- **YAML configuration**: `config.yaml` for WLED host, home Wi-Fi, allowlist, and tunables
-- **Home Wi-Fi guard**: Exits cleanly (WLED off) when SSID does not match home network
+- **YAML configuration**: `config.yaml` for WLED host, allowlist, and tunables
+- **Home start via Task Scheduler**: Use the imported XML **Network** condition; no in-app Wi-Fi polling
 - **System tray** (Windows): Tray icon color matches current busy-state color
 - **Task Scheduler kit**: Importable XML plus PowerShell start/stop scripts
 - **Low Resource Usage**: Minimal CPU and memory footprint (~0.3-0.5% CPU)
@@ -133,7 +133,7 @@ scripts\run-busylight.cmd      REM pythonw busylight.py (set PYTHONW if not on P
 ```
 
 ```powershell
-.\scripts\run-busylight.ps1    # optional: home SSID pre-check, single-instance launch
+.\scripts\run-busylight.ps1    # optional launch helper (SSID pre-check only if home_wifi_ssid is set)
 .\scripts\stop-busylight.ps1   # stops pythonw busylight.py
 ```
 
@@ -141,9 +141,9 @@ scripts\run-busylight.cmd      REM pythonw busylight.py (set PYTHONW if not on P
 
 1. Import `tasks/BusyLight-HomeWiFi-Logon.xml` or `tasks/BusyLight-Logon-NoCondition.xml` in Task Scheduler.
 2. Set **Program/script** to your `pythonw.exe` path (`REPLACE_WITH_PYTHONW`), **Arguments** to `busylight.py`, and **Start in** to the repo folder (`REPLACE_WITH_REPO`). See [docs/task-scheduler.md](docs/task-scheduler.md).
-3. For the Home Wi-Fi template, also set the **Network** condition profile name.
+3. For the Home Wi-Fi template, set the **Network** condition to your Windows profile name (this is how home-only start is enforced).
 
-When you disconnect from home Wi-Fi, the controller turns WLED off and exits on the next status check (no extra Wi-Fi timer).
+BusyLight does not poll Wi-Fi or exit when you leave the network; stop it manually or sign out if needed.
 
 ## Troubleshooting
 
@@ -305,7 +305,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
-- **1.2** - YAML config, home Wi-Fi exit, system tray launcher (`busylight.py`), Task Scheduler scripts, and unit tests
+- **1.2** - YAML config, system tray launcher (`busylight.py`), Task Scheduler scripts, and unit tests
 - **1.1** - Added connection reliability improvements:
   - Keep-alive mechanism to prevent WLED connection timeouts
   - Connection pooling with requests Session for better reliability
