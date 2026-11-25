@@ -6,12 +6,14 @@ BusyLight starts with **`pythonw.exe`** and **`busylight.py`** (no console windo
 
 For optional SSID pre-checks, single-instance locking, or logging before launch, use **`scripts/run-busylight.ps1`** manually (not the default in the XML templates).
 
+**Home Wi-Fi is enforced only by Task Scheduler** (the **Network** condition on the logon task). BusyLight does **not** run `netsh` or exit when you disconnect from home Wi-Fi while it is running.
+
 ## 1. Configure `config.yaml`
 
 Copy `config.yaml.example` to `config.yaml` and set:
 
-- `home_wifi_ssid` - the SSID you connect to at home
 - `wled_host` - hostname or IP of your WLED device
+- `home_wifi_ssid` - optional; keeps docs aligned with your home network and enables an optional pre-check in `run-busylight.ps1` (unused by the Python monitor)
 
 ## 2. Find `pythonw.exe`
 
@@ -21,7 +23,7 @@ Typical path (adjust for your user and Python version):
 
 Or run `where pythonw` in Command Prompt after Python is on PATH.
 
-## 3. Map SSID to Task Scheduler network name
+## 3. Map profile name to Task Scheduler network condition
 
 Task Scheduler uses the **saved Windows network profile name**, which is usually the same as the Wi-Fi SSID but not always.
 
@@ -29,7 +31,7 @@ Task Scheduler uses the **saved Windows network profile name**, which is usually
 2. Select your home network and note the profile name
 3. Set that name in the imported task **Conditions** -> **Start only if the following network connection is available**
 
-Keep `home_wifi_ssid` in `config.yaml` aligned with what `netsh wlan show interfaces` reports for **SSID**.
+You can set `home_wifi_ssid` in `config.yaml` to the same name for your own reference (and for optional `run-busylight.ps1` pre-checks).
 
 ## 4. Import the task XML
 
@@ -38,8 +40,8 @@ Task definitions use schema **version 1.4** with **Conditions** nested under **S
 1. Open **Task Scheduler**
 2. **Action** -> **Import Task...**
 3. Choose one of:
-   - `tasks/BusyLight-HomeWiFi-Logon.xml` — logon trigger plus **Network** condition (home profile must be available)
-   - `tasks/BusyLight-Logon-NoCondition.xml` — logon only; home SSID is enforced inside `busylight.py` during monitoring
+   - `tasks/BusyLight-HomeWiFi-Logon.xml` — logon trigger plus **Network** condition (home profile must be available) **(recommended)**
+   - `tasks/BusyLight-Logon-NoCondition.xml` — logon only; no network gate (use only for testing)
 4. Edit the task **Actions** tab:
    - **Program/script** (`Command` in XML): full path to `pythonw.exe` (replace `REPLACE_WITH_PYTHONW`)
    - **Add arguments**: `busylight.py`
@@ -47,18 +49,16 @@ Task definitions use schema **version 1.4** with **Conditions** nested under **S
 5. For the Home Wi-Fi XML only: **Conditions** -> set **Network** to your Windows profile name (replace `REPLACE_WITH_WINDOWS_NETWORK_PROFILE_NAME`)
 6. Save and run once to test
 
-The **Network** condition uses the saved Windows **connection profile name** from Settings -> **Manage known networks**, not necessarily the same spelling or casing as the **SSID** field from `netsh wlan show interfaces`. Configure both the task profile name and `home_wifi_ssid` in `config.yaml` so they match your real home network.
+The **Network** condition uses the saved Windows **connection profile name** from Settings -> **Manage known networks**, not necessarily the same spelling or casing as the **SSID** field from `netsh wlan show interfaces`.
 
 ### Quick manual start (no Task Scheduler)
 
 - Double-click `scripts/run-busylight.cmd` (uses `pythonw` on PATH, or set `PYTHONW` first)
 - Or: `pythonw busylight.py` from the repo folder in Command Prompt
 
-## 5. Stopping when you leave home
+## 5. Stopping BusyLight
 
-You do not need a separate disconnect task. Each monitoring loop checks Wi-Fi using the same interval as status polling. When the SSID no longer matches `home_wifi_ssid`, BusyLight turns WLED off and exits.
-
-To stop manually, run `scripts/stop-busylight.ps1` or use **Exit** on the system tray icon.
+There is no automatic stop when you leave home Wi-Fi. To stop manually, run `scripts/stop-busylight.ps1` or use **Exit** on the system tray icon.
 
 ## Troubleshooting
 
@@ -68,7 +68,7 @@ Schedule **pythonw.exe** so BusyLight runs without a console window. Using **pyt
 
 ### General tab
 
-Set **Configure for** to your Windows version and choose **Run only when user is logged on** so the tray icon and Wi-Fi checks behave as expected.
+Set **Configure for** to your Windows version and choose **Run only when user is logged on** so the tray icon behaves as expected.
 
 ### Delays at logon
 

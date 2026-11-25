@@ -45,6 +45,7 @@ DEFAULT_EFFECTS: Dict[str, int] = {
 
 DEFAULTS: Dict[str, Any] = {
     "wled_host": "wled-busylight.lan",
+    # Documented for Task Scheduler; not used by the monitoring loop (no in-app Wi-Fi polling).
     "home_wifi_ssid": "YourHomeWiFi",
     "app_allowlist": [
         "teams",

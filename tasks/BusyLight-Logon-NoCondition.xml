@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Start BusyLight at user logon via pythonw (no Task Scheduler network condition; home SSID is checked inside busylight.py). Edit pythonw path and repo folder before import (see docs/task-scheduler.md).</Description>
+    <Description>Start BusyLight at user logon via pythonw (no Task Scheduler network condition). Prefer BusyLight-HomeWiFi-Logon.xml to start only on your home network. Edit pythonw path and repo folder before import (see docs/task-scheduler.md).</Description>
     <URI>\BusyLight\BusyLight-Logon-NoCondition</URI>
   </RegistrationInfo>
   <Triggers>
