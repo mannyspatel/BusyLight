@@ -2,8 +2,9 @@
 # config.yaml is gitignored; commit only this example.
 
 wled_host: wled-busylight.lan
-# For Task Scheduler / docs alignment only; BusyLight does not poll Wi-Fi at runtime.
-# Optional: scripts/run-busylight.ps1 can use this for a launch-time SSID pre-check if set.
+# Optional. BusyLight (pythonw + busylight.py) never checks Wi-Fi at runtime.
+# Task Scheduler network condition: leave as placeholder or omit meaning — set wled_host only.
+# scripts/run-busylight.ps1: pre-check runs only when this is set to your real SSID (not empty / not YourHomeWiFi).
 home_wifi_ssid: YourHomeWiFi
 
 app_allowlist:

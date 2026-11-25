@@ -88,11 +88,12 @@ Minimum settings:
 
 ```yaml
 wled_host: wled-busylight.lan
-home_wifi_ssid: YourHomeWiFi
 app_allowlist:
   - teams
   - zoom
 ```
+
+`home_wifi_ssid` is optional: **not used by `busylight.py`**. Task Scheduler users enforce home-only startup with the imported XML **Network** condition. Set `home_wifi_ssid` only when using `scripts/run-busylight.ps1` (non-placeholder value enables a launch-time SSID pre-check).
 
 See `config.yaml.example` for optional tunables (intervals, colors, brightness, debug).
 
@@ -141,9 +142,9 @@ scripts\run-busylight.cmd      REM pythonw busylight.py (set PYTHONW if not on P
 
 1. Import `tasks/BusyLight-HomeWiFi-Logon.xml` or `tasks/BusyLight-Logon-NoCondition.xml` in Task Scheduler.
 2. Set **Program/script** to your `pythonw.exe` path (`REPLACE_WITH_PYTHONW`), **Arguments** to `busylight.py`, and **Start in** to the repo folder (`REPLACE_WITH_REPO`). See [docs/task-scheduler.md](docs/task-scheduler.md).
-3. For the Home Wi-Fi template, set the **Network** condition to your Windows profile name (this is how home-only start is enforced).
+3. For the Home Wi-Fi template, set the **Network** condition to your Windows profile name (home-only **start** — not checked again while BusyLight runs).
 
-BusyLight does not poll Wi-Fi or exit when you leave the network; stop it manually or sign out if needed.
+BusyLight does not poll Wi-Fi or exit when SSID changes; stop it with `scripts/stop-busylight.ps1`, tray **Exit**, or sign-out as needed. You do not need `home_wifi_ssid` in `config.yaml` for this path.
 
 ## Troubleshooting
 
@@ -297,7 +298,7 @@ pip install pyyaml
 python -m unittest discover -s tests -v
 ```
 
-Not covered on Linux: system tray (`pystray`), Windows registry/audio (`pycaw`), and live Wi-Fi (`netsh`).
+Not covered on Linux: system tray (`pystray`) and Windows registry/audio (`pycaw`).
 
 ## License
 
