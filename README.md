@@ -29,7 +29,7 @@ A Python application that monitors video-call status (Teams, Zoom, Webex, and ot
 ## Requirements
 
 - Windows 11 (or Windows 10)
-- Python 3.7+
+- **Python 3.10–3.12** (**3.12 recommended** on Windows). Python **3.13+ is not supported yet** (dependencies such as `pycaw` often lack wheels).
 - WLED device on your local network
 - Non-administrative user account
 
@@ -41,10 +41,12 @@ Double-click setup installs **Python (when needed) and all pip packages in one r
 
 1. Download or clone this repository.
 2. Double-click **`install-busylight.cmd`** in the project folder (or run **`Install-BusyLight.ps1`**). The `.cmd` file opens a **PowerShell** window titled **BusyLight Setup** and runs the installer there.
-3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). **Installer v1.4** tries a per-user (`--scope user`) winget install first, then offers a silent [python.org](https://www.python.org/downloads/) download if winget fails or you skipped it. It reloads your user PATH from the registry, searches common install folders if `python` is still missing, and treats `pip show` “package not found” as a normal skip (no crash when checking requirements).
+3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). **Installer v1.5** prefers `py -3.12` when multiple versions are installed, warns if the default interpreter is **3.13 or newer**, installs pip packages **one at a time** for clearer errors, and prints full **pip output** when a install fails. It also tries a per-user (`--scope user`) winget install first, then offers a silent [python.org](https://www.python.org/downloads/) download if winget fails or you skipped it.
 4. Follow the on-screen messages. The installer skips packages that are already installed with a sufficient version, so it is safe to run again.
 
-After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.4**.
+After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.5**.
+
+If `python --version` shows **3.13, 3.14, or 3.15**, install [Python 3.12](https://www.python.org/downloads/) (or run `py -3.12` if it is already installed) before installing packages—otherwise `pip install` may fail building `pycaw` and related dependencies.
 
 If both winget and the automatic python.org step fail, install Python manually from [python.org](https://www.python.org/downloads/), not the Microsoft Store shortcut—then run the installer again. If Windows still says Python is missing after you install, open **Settings → Apps → Advanced app settings → App execution aliases** and turn off the **python.exe** / **python3.exe** stubs so the real interpreter is used.
 
@@ -52,7 +54,7 @@ When setup finishes, run the controller (see [Running the Script](#running-the-s
 
 ### 1. Install Python
 
-Download and install Python from [python.org](https://www.python.org/downloads/). During installation, **make sure to check "Add Python to PATH"**.
+On Windows, download and install **Python 3.12** from [python.org](https://www.python.org/downloads/) (versions 3.10–3.12 work; avoid 3.13+ until dependency wheels are available). During installation, **make sure to check "Add Python to PATH"**.
 
 ### 2. Install Required Packages
 
