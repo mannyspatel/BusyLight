@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from busylight_config import BusyLightConfig, load_config
-from wifi_ssid import is_on_home_wifi
+from wifi_ssid import get_connected_wifi_ssid, is_on_home_wifi
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IAudioEndpointVolume, ISimpleAudioVolume
@@ -622,8 +622,10 @@ class TeamsMonitor:
 
                 if not is_on_home_wifi(self.config.home_wifi_ssid):
                     timestamp = datetime.now().strftime("%H:%M:%S")
+                    current = get_connected_wifi_ssid()
                     print(
-                        f"[{timestamp}] Not on home Wi-Fi ({self.config.home_wifi_ssid!r}) - shutting down"
+                        f"[{timestamp}] Not on home Wi-Fi "
+                        f"(expected {self.config.home_wifi_ssid!r}, current={current!r}) - shutting down"
                     )
                     self.turn_off_wled()
                     break

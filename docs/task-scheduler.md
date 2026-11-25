@@ -21,13 +21,19 @@ Keep `home_wifi_ssid` in `config.yaml` aligned with what `netsh wlan show interf
 
 ## 3. Import the task XML
 
+Task definitions use schema **version 1.4** with **Conditions** nested under **Settings** (as exported by current Windows). Older hand-edited XML that places `<Conditions>` as a sibling after `</Settings>` fails to import with error **(37,5):Conditions**.
+
 1. Open **Task Scheduler**
 2. **Action** -> **Import Task...**
-3. Choose `tasks/BusyLight-HomeWiFi-Logon.xml`
+3. Choose one of:
+   - `tasks/BusyLight-HomeWiFi-Logon.xml` — logon trigger plus **Network** condition (home profile must be available)
+   - `tasks/BusyLight-Logon-NoCondition.xml` — logon only; SSID gating is handled entirely by `scripts/run-busylight.ps1` (easier import if you do not need the scheduler network check)
 4. Edit the task:
    - **Actions**: set **Start in** and the script path to your clone folder (replace `REPLACE_WITH_REPO`)
-   - **Conditions**: set **Network** to your Windows profile name (replace `REPLACE_WITH_WINDOWS_NETWORK_PROFILE_NAME`)
+   - For the Home Wi-Fi XML only: **Conditions** -> set **Network** to your Windows profile name (replace `REPLACE_WITH_WINDOWS_NETWORK_PROFILE_NAME`)
 5. Save and run once to test
+
+The **Network** condition uses the saved Windows **connection profile name** from Settings -> **Manage known networks**, not necessarily the same spelling or casing as the **SSID** field from `netsh wlan show interfaces`. Configure both the task profile name and `home_wifi_ssid` in `config.yaml` so they match your real home network.
 
 Alternatively, double-click `scripts/run-busylight.cmd` from Explorer after editing paths in the XML, or schedule that `.cmd` file.
 
