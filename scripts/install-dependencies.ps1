@@ -10,7 +10,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
-$script:InstallerVersion = '1.1'
+$script:InstallerVersion = '1.2'
 
 function Write-Step {
     param([string]$Message)
@@ -34,8 +34,10 @@ function Write-Warn {
 }
 
 function Get-RepoRoot {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    return (Resolve-Path (Join-Path $scriptDir "..")).Path
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    }
+    throw "Cannot determine repo root (run this script with: powershell -File scripts\install-dependencies.ps1)"
 }
 
 function Test-RealPythonVersionOutput {
