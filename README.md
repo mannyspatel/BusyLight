@@ -44,6 +44,8 @@ Double-click setup installs **Python (when needed) and all pip packages in one r
 3. If Python is missing, the script offers to install **Python 3.12 via winget** (default yes). On success it refreshes PATH and continues installing dependencies in the same window—no need to run the installer twice.
 4. Follow the on-screen messages. The installer skips packages that are already installed with a sufficient version, so it is safe to run again.
 
+After pulling the latest `main`, run `git pull`, then confirm the setup window shows **installer v1.1** (or open `scripts/install-dependencies.ps1` and check that line 140 uses `Settings, Apps` rather than `Settings >`).
+
 If winget is blocked or unavailable, install Python from [python.org](https://www.python.org/downloads/), not the Microsoft Store shortcut—then run the installer again. If Windows still says Python is missing after you install, open **Settings → Apps → Advanced app settings → App execution aliases** and turn off the **python.exe** / **python3.exe** stubs so the real interpreter is used.
 
 When setup finishes, run the controller (see [Running the Script](#running-the-script)).
