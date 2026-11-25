@@ -5,12 +5,12 @@
 
 .DESCRIPTION
   Idempotent setup: installs Python via winget when missing, detects Python
-  (supported: 3.10–3.12; warns on 3.13+), upgrades pip when needed, and installs
+  (supported: 3.10-3.12; warns on 3.13+), upgrades pip when needed, and installs
   packages from requirements.txt only when they are missing or below minimum version.
 #>
 
 $ErrorActionPreference = "Stop"
-$script:InstallerVersion = '1.5'
+$script:InstallerVersion = '1.5.1'
 $script:PythonMinorMin = 10
 $script:PythonMinorMax = 12
 
@@ -235,7 +235,7 @@ function Test-PythonVersionSupported {
     Write-Ok ('Found Python: ' + $display)
 
     if (Test-PythonVersionInSupportedRange -Version $ver) {
-        Write-Ok "Python $($ver.Major).$($ver.Minor) is supported (BusyLight targets 3.$($script:PythonMinorMin)–3.$($script:PythonMinorMax))."
+        Write-Ok "Python $($ver.Major).$($ver.Minor) is supported (BusyLight targets 3.$($script:PythonMinorMin)-3.$($script:PythonMinorMax))."
         return
     }
 
@@ -392,7 +392,7 @@ function Install-PythonFromPythonOrg {
 
 function Show-ManualPythonInstructions {
     Write-Host ""
-    Write-Host "Please install Python 3.12 (supported: 3.10–3.12) from:" -ForegroundColor Yellow
+    Write-Host "Please install Python 3.12 (supported: 3.10-3.12) from:" -ForegroundColor Yellow
     Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
