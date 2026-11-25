@@ -10,6 +10,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
+$script:InstallerVersion = '1.1'
 
 function Write-Step {
     param([string]$Message)
@@ -135,9 +136,9 @@ function Show-ManualPythonInstructions {
     Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
-    Write-Host "Use the installer from python.org — not the Microsoft Store app execution alias stubs." -ForegroundColor Yellow
+    Write-Host "Use the installer from python.org - not the Microsoft Store app execution alias stubs." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host 'Optional: Settings, Apps, Advanced app settings, App execution aliases —' -ForegroundColor DarkGray
+    Write-Host 'Optional: Settings, Apps, Advanced app settings, App execution aliases -' -ForegroundColor DarkGray
     Write-Host "turn off python.exe and python3.exe so Windows does not intercept the python command." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Then run this installer again." -ForegroundColor Yellow
@@ -347,7 +348,7 @@ function Install-Requirements {
 # --- Main ---
 Clear-Host
 Write-Host "============================================================" -ForegroundColor White
-Write-Host "  BusyLight — Install Python and Dependencies" -ForegroundColor White
+Write-Host ('  BusyLight - Install Python and Dependencies (installer v' + $script:InstallerVersion + ')') -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor White
 
 $repoRoot = Get-RepoRoot
@@ -393,7 +394,7 @@ if ($null -eq $python) {
 }
 
 $versionOut = Invoke-Python -Python $python -ScriptArgs @("--version")
-Write-Ok "Found Python: $($versionOut -join ' ')"
+Write-Ok ('Found Python: ' + ($versionOut -join ' '))
 
 Write-Step "Checking pip..."
 Update-PipIfNeeded -Python $python
@@ -406,7 +407,8 @@ Write-Host "============================================================" -Foreg
 Write-Host "  Setup finished successfully!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next step — run the controller from this folder:" -ForegroundColor White
+Write-Host "Next step - run the controller from this folder:" -ForegroundColor White
 Write-Host "  python teams_light_controller.py" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Repo root: $repoRoot" -ForegroundColor DarkGray
+Read-Host 'Press Enter to close'
