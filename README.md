@@ -162,6 +162,38 @@ The script uses Windows Core Audio API to check the system-level mute state, whi
   
 - **Check for error log**: Run the script manually to see any error messages
 
+### Light Stays On When Computer Sleeps
+
+If your light stays on when your laptop goes to sleep or hibernates, you have several options:
+
+#### Option 1: Upgrade WLED Firmware (Recommended)
+
+WLED v0.15.0-b5 doesn't include the "Idle Timeout" feature. This feature was added in later versions (v0.14.0+ stable releases). If possible, upgrade your WLED firmware to a newer version that includes idle timeout:
+
+1. Open your WLED web interface
+2. Go to **Settings** → **LED Preferences** (or **Time & Macros** in newer versions)
+3. Find **"Idle Timeout"** or **"Idle Time"**
+4. Set it to your desired timeout (e.g., 10 minutes = 600 seconds)
+5. Enable the option if it's a toggle
+6. Save settings
+
+This is the best solution because it works even if the Python script crashes or stops running.
+
+#### Option 2: Python Script Timeout
+
+The script has an `IDLE_TIMEOUT` setting that will turn off the light if no successful updates are sent for a specified period:
+
+1. Open `teams_light_controller.py` in a text editor
+2. Find the line: `IDLE_TIMEOUT = 600  # Seconds - turn off light if no successful updates for this long (0 = disabled)`
+3. Set it to your desired timeout in seconds (e.g., `600` for 10 minutes, `0` to disable)
+4. Save and restart the script
+
+**Note**: This only works while the script is running. If your computer sleeps, the script also pauses.
+
+#### Option 3: Automatic Wake Detection (Built-in)
+
+The script now automatically detects when your system wakes from sleep and turns off the light as a safety measure. It will then check the current state and turn it back on if you're actually in a call. This works automatically - no configuration needed.
+
 ## How to Stop the Script
 
 ### If Running in a Window
@@ -268,5 +300,13 @@ If you encounter issues:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Version History
+
+- **1.1** - Added connection reliability improvements:
+  - Keep-alive mechanism to prevent WLED connection timeouts
+  - Connection pooling with requests Session for better reliability
+  - Retry logic with exponential backoff for failed requests
+  - Idle timeout to turn off light after period of inactivity
+  - Automatic wake-from-sleep detection to turn off light when computer wakes
+  - Improved error handling and connection recovery
 
 - **1.0** - Initial release with camera detection, microphone mute detection, audio activity monitoring, and WLED integration
