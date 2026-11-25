@@ -40,8 +40,10 @@ A Python application that monitors video-call status (Teams, Zoom, Webex, and ot
 If you already have [Python](https://www.python.org/downloads/) on your PATH (or the Windows `py` launcher), you can install all Python dependencies in one step:
 
 1. Download or clone this repository.
-2. Double-click **`install-busylight.cmd`** in the project folder (or run **`Install-BusyLight.ps1`**).
+2. Double-click **`install-busylight.cmd`** in the project folder (or run **`Install-BusyLight.ps1`**). The `.cmd` file opens a **PowerShell** window titled **BusyLight Setup** and runs the installer there.
 3. Follow the on-screen messages. The installer skips packages that are already installed with a sufficient version, so it is safe to run again.
+
+Install Python from [python.org](https://www.python.org/downloads/), not the Microsoft Store shortcut. If Windows still says Python is missing after you install, open **Settings → Apps → Advanced app settings → App execution aliases** and turn off the **python.exe** / **python3.exe** stubs so the real interpreter is used.
 
 When setup finishes, run the controller (see [Running the Script](#running-the-script)).
 

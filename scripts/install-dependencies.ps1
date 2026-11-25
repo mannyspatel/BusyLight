@@ -36,16 +36,33 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $scriptDir "..")).Path
 }
 
+function Test-RealPythonVersionOutput {
+    param([string[]]$OutputLines)
+
+    if ($null -eq $OutputLines -or $OutputLines.Count -eq 0) {
+        return $false
+    }
+
+    $combined = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+    if ($combined -match "Microsoft Store" -or $combined -match "run without arguments to install") {
+        return $false
+    }
+    if ($combined -notmatch "Python 3\.") {
+        return $false
+    }
+    return $true
+}
+
 function Find-PythonExecutable {
     $candidates = @(
-        @{ Cmd = "python"; Args = @("--version") },
-        @{ Cmd = "py"; Args = @("-3", "--version") }
+        @{ Cmd = "py"; Args = @("-3", "--version") },
+        @{ Cmd = "python"; Args = @("--version") }
     )
 
     foreach ($c in $candidates) {
         try {
-            $null = & $c.Cmd @($c.Args) 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            $output = @(& $c.Cmd @($c.Args) 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -eq 0 -and (Test-RealPythonVersionOutput -OutputLines $output)) {
                 if ($c.Cmd -eq "py") {
                     return @{ Launcher = "py"; PipArgs = @("-3", "-m", "pip"); PyArgs = @("-3") }
                 }
@@ -251,7 +268,7 @@ Write-Host "============================================================" -Foreg
 $repoRoot = Get-RepoRoot
 $requirementsFile = Join-Path $repoRoot "requirements.txt"
 
-Write-Step "Looking for Python (python or py -3)..."
+Write-Step "Looking for Python (py -3 or python)..."
 $python = Find-PythonExecutable
 
 if ($null -eq $python) {
@@ -262,11 +279,16 @@ if ($null -eq $python) {
     Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
+    Write-Host "Use the installer from python.org — not the Microsoft Store app execution alias stubs." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Optional: Settings > Apps > Advanced app settings > App execution aliases —" -ForegroundColor DarkGray
+    Write-Host "turn off python.exe and python3.exe so Windows does not intercept the python command." -ForegroundColor DarkGray
+    Write-Host ""
     Write-Host "Then run this installer again." -ForegroundColor Yellow
 
     if (Test-WingetAvailable) {
         Write-Host ""
-        $reply = Read-Host "winget is available. Try winget install Python.Python.3.12 now? (y/N)"
+        $reply = Read-Host 'winget is available. Install Python.Python.3.12 now? (y/N)'
         if ($reply -match "^[Yy]") {
             Write-Warn "This may prompt for administrator approval..."
             winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
