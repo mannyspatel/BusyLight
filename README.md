@@ -114,30 +114,34 @@ python busylight.py
 On Windows, **tray mode is on by default**: a system tray icon shows the current status color; use the menu for status text or **Exit** (turns WLED off).
 
 - Console only: `python busylight.py --no-tray`
-- Legacy entry point: `python teams_light_controller.py` (no tray; loads `config.yaml`)
+- Hidden / no console: `pythonw busylight.py` (same tray behavior)
+
+`teams_light_controller.py` holds the `TeamsMonitor` implementation (library only). Running it directly prints a reminder to use `busylight.py`.
 
 ### One-time console test
 
 ```bash
-python teams_light_controller.py
+python busylight.py
 ```
 
-Press `Ctrl+C` to stop; WLED turns off on exit.
+Press `Ctrl+C` to stop (console mode), or use the tray **Exit** menu; WLED turns off on exit.
 
-### Start / stop scripts (PowerShell)
+### Start / stop scripts
+
+```batch
+scripts\run-busylight.cmd      REM pythonw busylight.py (set PYTHONW if not on PATH)
+```
 
 ```powershell
-.\scripts\run-busylight.ps1    # checks home SSID, single-instance pythonw launch
+.\scripts\run-busylight.ps1    # optional: home SSID pre-check, single-instance launch
 .\scripts\stop-busylight.ps1   # stops pythonw busylight.py
 ```
 
-Optional Task Scheduler wrapper: `scripts/run-busylight.cmd`
-
 ### Run on Windows logon (Task Scheduler)
 
-1. Import `tasks/BusyLight-HomeWiFi-Logon.xml` in Task Scheduler.
-2. Replace `REPLACE_WITH_REPO` and `REPLACE_WITH_WINDOWS_NETWORK_PROFILE_NAME` (see [docs/task-scheduler.md](docs/task-scheduler.md)).
-3. The task starts `scripts/run-busylight.ps1`, which verifies Wi-Fi before launch.
+1. Import `tasks/BusyLight-HomeWiFi-Logon.xml` or `tasks/BusyLight-Logon-NoCondition.xml` in Task Scheduler.
+2. Set **Program/script** to your `pythonw.exe` path (`REPLACE_WITH_PYTHONW`), **Arguments** to `busylight.py`, and **Start in** to the repo folder (`REPLACE_WITH_REPO`). See [docs/task-scheduler.md](docs/task-scheduler.md).
+3. For the Home Wi-Fi template, also set the **Network** condition profile name.
 
 When you disconnect from home Wi-Fi, the controller turns WLED off and exits on the next status check (no extra Wi-Fi timer).
 

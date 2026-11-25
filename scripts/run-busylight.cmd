@@ -1,5 +1,6 @@
 @echo off
 setlocal
 cd /d "%~dp0.."
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-busylight.ps1"
+if not defined PYTHONW set PYTHONW=pythonw
+"%PYTHONW%" busylight.py
 exit /b %ERRORLEVEL%
