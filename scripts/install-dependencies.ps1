@@ -1,0 +1,298 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Installs Python dependencies for the Teams Status Light Controller (BusyLight).
+
+.DESCRIPTION
+  Idempotent setup: detects Python, upgrades pip when needed, and installs
+  packages from requirements.txt only when they are missing or below minimum version.
+#>
+
+$ErrorActionPreference = "Stop"
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok {
+    param([string]$Message)
+    Write-Host "    OK: $Message" -ForegroundColor Green
+}
+
+function Write-Skip {
+    param([string]$Message)
+    Write-Host "    SKIP: $Message" -ForegroundColor DarkGray
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "    NOTE: $Message" -ForegroundColor Yellow
+}
+
+function Get-RepoRoot {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    return (Resolve-Path (Join-Path $scriptDir "..")).Path
+}
+
+function Find-PythonExecutable {
+    $candidates = @(
+        @{ Cmd = "python"; Args = @("--version") },
+        @{ Cmd = "py"; Args = @("-3", "--version") }
+    )
+
+    foreach ($c in $candidates) {
+        try {
+            $null = & $c.Cmd @($c.Args) 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                if ($c.Cmd -eq "py") {
+                    return @{ Launcher = "py"; PipArgs = @("-3", "-m", "pip"); PyArgs = @("-3") }
+                }
+                return @{ Launcher = "python"; PipArgs = @("-m", "pip"); PyArgs = @() }
+            }
+        }
+        catch {
+            # try next
+        }
+    }
+    return $null
+}
+
+function Test-WingetAvailable {
+    try {
+        $null = Get-Command winget -ErrorAction Stop
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Invoke-Python {
+    param(
+        [hashtable]$Python,
+        [string[]]$ScriptArgs
+    )
+    if ($Python.Launcher -eq "py") {
+        & py @($Python.PyArgs + $ScriptArgs)
+    }
+    else {
+        & python @ScriptArgs
+    }
+}
+
+function Invoke-Pip {
+    param(
+        [hashtable]$Python,
+        [string[]]$PipSubArgs
+    )
+    if ($Python.Launcher -eq "py") {
+        & py @($Python.PyArgs + @("-m", "pip") + $PipSubArgs)
+    }
+    else {
+        & python -m pip @PipSubArgs
+    }
+}
+
+function Get-InstalledPackageVersion {
+    param(
+        [hashtable]$Python,
+        [string]$PackageName
+    )
+    $lines = Invoke-Pip -Python $Python -PipSubArgs @("show", $PackageName) 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    foreach ($line in $lines) {
+        if ($line -match "^Version:\s*(.+)$") {
+            return $Matches[1].Trim()
+        }
+    }
+    return $null
+}
+
+function Test-VersionSatisfiesMinimum {
+    param(
+        [string]$Installed,
+        [string]$Minimum
+    )
+    if ([string]::IsNullOrWhiteSpace($Installed)) { return $false }
+
+    try {
+        $installedV = [version]$Installed
+        $minV = [version]$Minimum
+        return ($installedV -ge $minV)
+    }
+    catch {
+        # Date-style versions (e.g. pycaw 20230407) may not parse as System.Version.
+        if ($Installed -match "^\d+$" -and $Minimum -match "^\d+$") {
+            return ([int64]$Installed -ge [int64]$Minimum)
+        }
+        return ($Installed -ge $Minimum)
+    }
+}
+
+function Parse-RequirementLine {
+    param([string]$Line)
+    $trimmed = $Line.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+        return $null
+    }
+    if ($trimmed -match "^([A-Za-z0-9_.\-]+)\s*>=\s*(.+)$") {
+        return @{
+            Name = $Matches[1]
+            Minimum = $Matches[2].Trim()
+            Spec = $trimmed
+        }
+    }
+    if ($trimmed -match "^([A-Za-z0-9_.\-]+)") {
+        return @{
+            Name = $Matches[1]
+            Minimum = $null
+            Spec = $trimmed
+        }
+    }
+    return $null
+}
+
+function Test-PipUsable {
+    param([hashtable]$Python)
+    try {
+        Invoke-Pip -Python $Python -PipSubArgs @("--version") | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Update-PipIfNeeded {
+    param([hashtable]$Python)
+    if (-not (Test-PipUsable -Python $Python)) {
+        Write-Warn "pip is not available; bootstrapping with ensurepip..."
+        Invoke-Python -Python $Python -ScriptArgs @("-m", "ensurepip", "--upgrade")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to bootstrap pip. Install Python from python.org and ensure 'Add Python to PATH' is checked."
+        }
+    }
+
+    $pipVersionLine = (Invoke-Pip -Python $Python -PipSubArgs @("--version") | Select-Object -First 1)
+    if ($pipVersionLine -match "pip (\d+)\.(\d+)") {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2]
+        if ($major -lt 21) {
+            Write-Step "Upgrading pip (current: $pipVersionLine)"
+            Invoke-Pip -Python $Python -PipSubArgs @("install", "--upgrade", "pip")
+            if ($LASTEXITCODE -ne 0) {
+                throw "pip upgrade failed."
+            }
+            Write-Ok "pip upgraded"
+        }
+        else {
+            Write-Skip "pip is recent enough ($pipVersionLine)"
+        }
+    }
+}
+
+function Install-Requirements {
+    param(
+        [hashtable]$Python,
+        [string]$RequirementsPath
+    )
+    if (-not (Test-Path $RequirementsPath)) {
+        throw "requirements.txt not found at: $RequirementsPath"
+    }
+
+    $toInstall = @()
+    $lines = Get-Content -Path $RequirementsPath
+
+    foreach ($line in $lines) {
+        $req = Parse-RequirementLine -Line $line
+        if ($null -eq $req) { continue }
+
+        $installed = Get-InstalledPackageVersion -Python $Python -PackageName $req.Name
+        if ($null -ne $installed) {
+            if ($null -ne $req.Minimum) {
+                if (Test-VersionSatisfiesMinimum -Installed $installed -Minimum $req.Minimum) {
+                    Write-Skip "$($req.Name) $installed (meets $($req.Spec))"
+                    continue
+                }
+                Write-Warn "$($req.Name) $installed is below $($req.Spec); will upgrade"
+            }
+            else {
+                Write-Skip "$($req.Name) $installed already installed"
+                continue
+            }
+        }
+        else {
+            Write-Warn "$($req.Name) not installed; will install $($req.Spec)"
+        }
+        $toInstall += $req.Spec
+    }
+
+    if ($toInstall.Count -eq 0) {
+        Write-Ok "All required packages are already satisfied."
+        return
+    }
+
+    Write-Step "Installing: $($toInstall -join ', ')"
+    Invoke-Pip -Python $Python -PipSubArgs @("install", $toInstall)
+    if ($LASTEXITCODE -ne 0) {
+        throw "One or more package installations failed."
+    }
+    Write-Ok "Package installation complete"
+}
+
+# --- Main ---
+Clear-Host
+Write-Host "============================================================" -ForegroundColor White
+Write-Host "  BusyLight — Install Python Dependencies" -ForegroundColor White
+Write-Host "============================================================" -ForegroundColor White
+
+$repoRoot = Get-RepoRoot
+$requirementsFile = Join-Path $repoRoot "requirements.txt"
+
+Write-Step "Looking for Python (python or py -3)..."
+$python = Find-PythonExecutable
+
+if ($null -eq $python) {
+    Write-Host ""
+    Write-Host "Python was not found on this system." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Please install Python 3.7 or newer from:" -ForegroundColor Yellow
+    Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
+    Write-Host "Then run this installer again." -ForegroundColor Yellow
+
+    if (Test-WingetAvailable) {
+        Write-Host ""
+        $reply = Read-Host "winget is available. Try winget install Python.Python.3.12 now? (y/N)"
+        if ($reply -match "^[Yy]") {
+            Write-Warn "This may prompt for administrator approval..."
+            winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+            Write-Host ""
+            Write-Host "If installation finished, close this window, open a new one, and run the installer again." -ForegroundColor Yellow
+        }
+    }
+
+    exit 1
+}
+
+$versionOut = Invoke-Python -Python $python -ScriptArgs @("--version")
+Write-Ok "Found Python: $($versionOut -join ' ')"
+
+Write-Step "Checking pip..."
+Update-PipIfNeeded -Python $python
+
+Write-Step "Checking packages from requirements.txt..."
+Install-Requirements -Python $python -RequirementsPath $requirementsFile
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "  Setup finished successfully!" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Next step — run the controller from this folder:" -ForegroundColor White
+Write-Host "  python teams_light_controller.py" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Repo root: $repoRoot" -ForegroundColor DarkGray
