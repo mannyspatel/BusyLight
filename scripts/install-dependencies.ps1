@@ -4,8 +4,9 @@
   Installs Python dependencies for the Teams Status Light Controller (BusyLight).
 
 .DESCRIPTION
-  Idempotent setup: detects Python, upgrades pip when needed, and installs
-  packages from requirements.txt only when they are missing or below minimum version.
+  Idempotent setup: installs Python via winget when missing, detects Python,
+  upgrades pip when needed, and installs packages from requirements.txt only
+  when they are missing or below minimum version.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -36,16 +37,33 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $scriptDir "..")).Path
 }
 
+function Test-RealPythonVersionOutput {
+    param([string[]]$OutputLines)
+
+    if ($null -eq $OutputLines -or $OutputLines.Count -eq 0) {
+        return $false
+    }
+
+    $combined = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+    if ($combined -match "Microsoft Store" -or $combined -match "run without arguments to install") {
+        return $false
+    }
+    if ($combined -notmatch "Python 3\.") {
+        return $false
+    }
+    return $true
+}
+
 function Find-PythonExecutable {
     $candidates = @(
-        @{ Cmd = "python"; Args = @("--version") },
-        @{ Cmd = "py"; Args = @("-3", "--version") }
+        @{ Cmd = "py"; Args = @("-3", "--version") },
+        @{ Cmd = "python"; Args = @("--version") }
     )
 
     foreach ($c in $candidates) {
         try {
-            $null = & $c.Cmd @($c.Args) 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            $output = @(& $c.Cmd @($c.Args) 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -eq 0 -and (Test-RealPythonVersionOutput -OutputLines $output)) {
                 if ($c.Cmd -eq "py") {
                     return @{ Launcher = "py"; PipArgs = @("-3", "-m", "pip"); PyArgs = @("-3") }
                 }
@@ -66,6 +84,90 @@ function Test-WingetAvailable {
     }
     catch {
         return $false
+    }
+}
+
+function Add-PythonPathEntries {
+    param([string[]]$Directories)
+
+    foreach ($dir in $Directories) {
+        if (-not [string]::IsNullOrWhiteSpace($dir) -and (Test-Path -LiteralPath $dir)) {
+            if ($env:PATH -notlike "*$dir*") {
+                $env:PATH = "$dir;$env:PATH"
+            }
+        }
+    }
+}
+
+function Refresh-SessionPythonPath {
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    $candidates = @(
+        Join-Path $localAppData 'Programs\Python\Python312'
+        Join-Path $localAppData 'Programs\Python\Python312\Scripts'
+        'C:\Program Files\Python312'
+        'C:\Program Files\Python312\Scripts'
+        'C:\Program Files (x86)\Python312'
+        'C:\Program Files (x86)\Python312\Scripts'
+    )
+
+    foreach ($root in @(
+            Join-Path $localAppData 'Programs\Python'
+            'C:\Program Files\Python312'
+            'C:\Program Files (x86)\Python312'
+        )) {
+        if (Test-Path -LiteralPath $root) {
+            Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $candidates += $_.FullName
+                $scripts = Join-Path $_.FullName 'Scripts'
+                if (Test-Path -LiteralPath $scripts) {
+                    $candidates += $scripts
+                }
+            }
+        }
+    }
+
+    Add-PythonPathEntries -Directories ($candidates | Select-Object -Unique)
+}
+
+function Show-ManualPythonInstructions {
+    Write-Host ""
+    Write-Host "Please install Python 3.7 or newer from:" -ForegroundColor Yellow
+    Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
+    Write-Host "Use the installer from python.org — not the Microsoft Store app execution alias stubs." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Optional: Settings > Apps > Advanced app settings > App execution aliases —" -ForegroundColor DarkGray
+    Write-Host "turn off python.exe and python3.exe so Windows does not intercept the python command." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "Then run this installer again." -ForegroundColor Yellow
+}
+
+function Test-WingetInstallYes {
+    param([string]$Reply)
+    if ([string]::IsNullOrWhiteSpace($Reply)) {
+        return $true
+    }
+    if ($Reply -match '^[Yy]') {
+        return $true
+    }
+    if ($Reply -match '^[Nn]') {
+        return $false
+    }
+    return $true
+}
+
+function Install-PythonWithWinget {
+    Write-Step "Installing Python 3.12 via winget..."
+    Write-Warn "This may prompt for administrator or IT approval on corporate laptops."
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
     }
 }
 
@@ -245,37 +347,49 @@ function Install-Requirements {
 # --- Main ---
 Clear-Host
 Write-Host "============================================================" -ForegroundColor White
-Write-Host "  BusyLight — Install Python Dependencies" -ForegroundColor White
+Write-Host "  BusyLight — Install Python and Dependencies" -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor White
 
 $repoRoot = Get-RepoRoot
 $requirementsFile = Join-Path $repoRoot "requirements.txt"
 
-Write-Step "Looking for Python (python or py -3)..."
+Write-Step "Looking for Python (py -3 or python)..."
 $python = Find-PythonExecutable
 
 if ($null -eq $python) {
     Write-Host ""
     Write-Host "Python was not found on this system." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Please install Python 3.7 or newer from:" -ForegroundColor Yellow
-    Write-Host "  https://www.python.org/downloads/" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
-    Write-Host "Then run this installer again." -ForegroundColor Yellow
 
+    $wingetInstalled = $false
     if (Test-WingetAvailable) {
         Write-Host ""
-        $reply = Read-Host "winget is available. Try winget install Python.Python.3.12 now? (y/N)"
-        if ($reply -match "^[Yy]") {
-            Write-Warn "This may prompt for administrator approval..."
-            winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-            Write-Host ""
-            Write-Host "If installation finished, close this window, open a new one, and run the installer again." -ForegroundColor Yellow
+        $reply = Read-Host 'Install Python 3.12 via winget now? (Y/n)'
+        if (Test-WingetInstallYes -Reply $reply) {
+            $wingetInstalled = Install-PythonWithWinget
+            if ($wingetInstalled) {
+                Write-Ok "winget reported Python installation finished"
+                Refresh-SessionPythonPath
+                Write-Step "Looking for Python after winget install..."
+                $python = Find-PythonExecutable
+            }
+            else {
+                Write-Host ""
+                Write-Host "winget could not install Python (missing rights, policy, or network)." -ForegroundColor Red
+            }
+        }
+        else {
+            Write-Warn "Skipped automatic Python install via winget."
         }
     }
 
-    exit 1
+    if ($null -eq $python) {
+        Show-ManualPythonInstructions
+        if (-not (Test-WingetAvailable)) {
+            Write-Host ""
+            Write-Warn "winget is not available on this PC; use python.org or ask IT to install Python 3.12."
+        }
+        exit 1
+    }
 }
 
 $versionOut = Invoke-Python -Python $python -ScriptArgs @("--version")

@@ -1,6 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install-dependencies.ps1"
-echo.
-pause
+start "BusyLight Setup" powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install-dependencies.ps1"
