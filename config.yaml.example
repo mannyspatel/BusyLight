@@ -1,0 +1,33 @@
+# Copy this file to config.yaml and edit for your environment.
+# config.yaml is gitignored; commit only this example.
+
+wled_host: wled-busylight.lan
+home_wifi_ssid: YourHomeWiFi
+
+app_allowlist:
+  - teams
+  - ms-teams
+  - zoom
+  - webex
+  - ringcentral
+  - skype
+
+check_interval: 1.5
+debug: false
+
+keep_alive_interval: 300
+max_retries: 3
+idle_timeout: 600
+
+brightness: 128
+effect_speed: 128
+effect_intensity: 128
+
+audio_threshold: 0.01
+audio_detection_window: 3
+
+# Optional overrides (defaults shown)
+# colors:
+#   off: [0, 255, 0]
+# state_effects:
+#   mic_only: breathe

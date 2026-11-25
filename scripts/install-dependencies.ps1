@@ -770,7 +770,8 @@ Write-Host "  Setup finished successfully!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next step - run the controller from this folder:" -ForegroundColor White
-Write-Host "  python teams_light_controller.py" -ForegroundColor Cyan
+Write-Host "  Copy config.yaml.example to config.yaml, edit, then run:" -ForegroundColor Cyan
+Write-Host "  python busylight.py" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Repo root: $repoRoot" -ForegroundColor DarkGray
 Read-Host 'Press Enter to close'

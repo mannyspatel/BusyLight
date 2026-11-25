@@ -5,83 +5,24 @@ Includes audio level monitoring for accurate mute detection
 No admin rights required - works on restricted corporate laptops
 """
 
-__version__ = "1.1"
+__version__ = "1.2"
 
 import winreg
 import requests
 import time
 import json
 import atexit
+import threading
 from datetime import datetime
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
+
+from busylight_config import BusyLightConfig, load_config
+from wifi_ssid import is_on_home_wifi
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IAudioEndpointVolume, ISimpleAudioVolume
 from comtypes import GUID
-
-# ============= CONFIGURATION =============
-WLED_IP = "192.168.1.153"  # Your WLED device IP "wled-busylight.lan"
-CHECK_INTERVAL = 1.5  # Seconds between checks
-DEBUG_MODE = False  # Set to True to see detailed debug output
-KEEP_ALIVE_INTERVAL = 300  # Seconds - send keep-alive request even if state unchanged
-MAX_RETRIES = 3  # Number of retries for failed requests
-IDLE_TIMEOUT = 600  # Seconds - turn off light if no successful updates for this long (0 = disabled)
-
-# Color definitions (RGB format)
-COLORS = {
-    'off': (0, 255, 0),                  # Green - not in a call
-    'in_call_muted': (255, 200, 0),      # Orange - in call, mic muted
-    'in_call_quiet': (255, 255, 0),      # Yellow - in call, unmuted but quiet
-    'mic_only': (255, 255, 0),           # Yellow - breathe - unmuted and speaking
-    'camera_only': (255, 100, 0),        # Dark orange - camera on, mic muted
-    'camera_quiet': (255, 0, 0),         # Red - camera on, unmuted but quiet
-    'camera_and_mic': (255, 0, 0),       # Red - breathe - camera on and speaking
-}
-
-# WLED Effect IDs
-EFFECTS = {
-    'solid': 0,           # Solid color
-    'blink': 1,           # Blink effect
-    'breathe': 2,         # Breathe effect
-    'wipe': 3,            # Color wipe
-    'sweep': 12,          # Sweep effect
-    'chase': 28,          # Chase effect
-    'twinkle': 42,        # Twinkle effect
-    'colorloop': 9,       # Colorloop
-}
-
-# State-to-effect mapping
-STATE_EFFECTS = {
-    'off': 'solid',
-    'in_call_muted': 'solid',           # Muted - solid orange
-    'in_call_quiet': 'solid',           # Unmuted but quiet - solid yellow
-    'mic_only': 'breathe',              # Speaking - breathing yellow
-    'camera_only': 'solid',             # Camera on, muted - solid dark orange
-    'camera_quiet': 'solid',            # Camera on, unmuted but quiet - solid red
-    'camera_and_mic': 'breathe',        # Camera on, speaking - breathing red
-}
-
-BRIGHTNESS = 128  # 0-255, adjust brightness level
-EFFECT_SPEED = 128  # 0-255, speed of effects (higher = faster)
-EFFECT_INTENSITY = 128  # 0-255, intensity of effects
-
-# Audio detection settings
-AUDIO_THRESHOLD = 0.01  # Minimum audio level to consider mic "active" (0.0-1.0)
-AUDIO_DETECTION_WINDOW = 3  # Seconds - if audio detected within this window, mic is "on"
-
-# Apps that count as "in a call" when using mic/camera (case-insensitive substring
-# match against each ConsentStore subkey path, including NonPackaged entries).
-# Set to [] or None to detect ANY application (may trigger on browser tabs, etc.).
-APP_ALLOWLIST: Optional[List[str]] = [
-    "teams",
-    "ms-teams",
-    "zoom",
-    "webex",
-    "ringcentral",
-    "skype",
-]
-# =========================================
-
 
 def _subkey_matches_allowlist(subkey_path: str, allowlist: Optional[List[str]]) -> bool:
     """Return True if allowlist is empty/None or path contains any allowlist entry."""
@@ -94,7 +35,8 @@ def _subkey_matches_allowlist(subkey_path: str, allowlist: Optional[List[str]]) 
 class AudioMonitor:
     """Monitor microphone audio levels and mute state using Windows Core Audio API"""
     
-    def __init__(self):
+    def __init__(self, config: BusyLightConfig):
+        self.config = config
         self.meter = None
         self.endpoint_volume = None
         self.teams_session = None
@@ -122,7 +64,7 @@ class AudioMonitor:
                 # Store device for session enumeration
                 self.audio_device = devices
                 
-                if DEBUG_MODE:
+                if self.config.debug:
                     print("✓ Audio monitoring initialized (level + mute detection)")
             else:
                 print("⚠ Warning: Could not find default microphone for audio monitoring")
@@ -203,14 +145,14 @@ class AudioMonitor:
                                                 session_volume = session.QueryInterface(ISimpleAudioVolume._iid_)
                                                 if session_volume:
                                                     muted = session_volume.GetMute()
-                                                    if DEBUG_MODE:
+                                                    if self.config.debug:
                                                         print(f"    Teams session mute (PID {process_id}): {muted}")
                                                     kernel32.CloseHandle(h_process)
                                                     return bool(muted)
                                     finally:
                                         kernel32.CloseHandle(h_process)
                             except Exception as e:
-                                if DEBUG_MODE:
+                                if self.config.debug:
                                     print(f"    Error checking process name: {e}")
                                 continue
                     except:
@@ -219,7 +161,7 @@ class AudioMonitor:
                 except:
                     continue
         except Exception as e:
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"    Error checking Teams session mute: {e}")
         
         return None
@@ -233,7 +175,7 @@ class AudioMonitor:
         # This matches what Windows shows in the system tray
         session_muted = self.get_teams_session_mute()
         if session_muted is not None:
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"    Application session mute: {session_muted}")
             if session_muted:
                 return True
@@ -243,10 +185,10 @@ class AudioMonitor:
         if self.endpoint_volume:
             try:
                 system_muted = bool(self.endpoint_volume.GetMute())
-                if DEBUG_MODE:
+                if self.config.debug:
                     print(f"    System-level mute: {system_muted}")
             except Exception as e:
-                if DEBUG_MODE:
+                if self.config.debug:
                     print(f"    Error reading system mute: {e}")
         
         if system_muted:
@@ -263,7 +205,7 @@ class AudioMonitor:
                 time_since_audio = current_time - self.last_audio_time
                 
                 # Track if we've ever detected audio (mic was working)
-                if peak > AUDIO_THRESHOLD:
+                if peak > self.config.audio_threshold:
                     self.first_audio_detected = True
                     self.last_audio_time = current_time
                 
@@ -277,13 +219,13 @@ class AudioMonitor:
                     # Only mark as muted if completely silent for 15+ seconds after having detected audio
                     mute_threshold = 15  # 15 seconds of complete silence after audio was detected
                     if time_since_audio > mute_threshold:
-                        if DEBUG_MODE:
+                        if self.config.debug:
                             print(f"    Heuristic: Previously detected audio, now zero for {time_since_audio:.1f}s - likely muted")
                         return True
-                    elif DEBUG_MODE:
+                    elif self.config.debug:
                         print(f"    Heuristic: Zero audio for {time_since_audio:.1f}s, but not long enough to confirm mute")
             except Exception as e:
-                if DEBUG_MODE:
+                if self.config.debug:
                     print(f"    Error in mute heuristic: {e}")
         
         return False
@@ -301,37 +243,71 @@ class AudioMonitor:
             # Get current audio level (0.0 to 1.0)
             peak = self.meter.GetPeakValue()
             
-            if DEBUG_MODE and peak > 0.001:
+            if self.config.debug and peak > 0.001:
                 print(f"    Audio level: {peak:.4f}")
             
             # If audio is above threshold, update last audio time
-            if peak > AUDIO_THRESHOLD:
+            if peak > self.config.audio_threshold:
                 self.last_audio_time = time.time()
                 return True
             
             # Check if we detected audio recently
             time_since_audio = time.time() - self.last_audio_time
-            is_active = time_since_audio < AUDIO_DETECTION_WINDOW
+            is_active = time_since_audio < self.config.audio_detection_window
             
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"    Time since audio: {time_since_audio:.1f}s, Active: {is_active}")
             
             return is_active
             
         except Exception as e:
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"    Error reading audio level: {e}")
             return True  # Assume active if we can't read
 
 
 class TeamsMonitor:
-    def __init__(self, wled_ip: str):
-        self.wled_ip = wled_ip
-        self.last_state = None
-        self.audio_monitor = AudioMonitor()
+    def __init__(self, config: BusyLightConfig):
+        self.config = config
+        self.wled_host = config.wled_host
+        self.last_state: Optional[str] = None
+        self._published_state: Optional[str] = "off"
+        self._published_rgb: Tuple[int, int, int] = config.colors.get("off", (0, 255, 0))
+        self._state_lock = threading.Lock()
+        self.audio_monitor = AudioMonitor(config)
         self.session = requests.Session()  # Reuse connections for better reliability
         self.last_wled_update = 0  # Track last successful WLED update time
         self.last_check_time = time.time()  # Track last check time to detect sleep/wake
+        self._on_state_change: Optional[Callable[[str, Tuple[int, int, int]], None]] = None
+
+    @property
+    def current_state(self) -> Optional[str]:
+        with self._state_lock:
+            return self._published_state
+
+    @property
+    def current_rgb(self) -> Tuple[int, int, int]:
+        with self._state_lock:
+            return self._published_rgb
+
+    def set_state_change_callback(
+        self, callback: Optional[Callable[[str, Tuple[int, int, int]], None]]
+    ) -> None:
+        self._on_state_change = callback
+
+    def _publish_state(self, state: Optional[str]) -> None:
+        if state is None:
+            return
+        rgb = self.config.colors.get(state, self.config.colors.get("off", (0, 255, 0)))
+        with self._state_lock:
+            changed = state != self._published_state or rgb != self._published_rgb
+            self._published_state = state
+            self._published_rgb = rgb
+        if changed and self._on_state_change:
+            try:
+                self._on_state_change(state, rgb)
+            except Exception:
+                pass
         
     def _consent_key_device_active(
         self, registry_path: str, subkey_relative: str, path_for_allowlist: str
@@ -348,9 +324,9 @@ class TeamsMonitor:
             try:
                 last_used_stop = winreg.QueryValueEx(key, "LastUsedTimeStop")[0]
                 if last_used_stop == 0 and _subkey_matches_allowlist(
-                    path_for_allowlist, APP_ALLOWLIST
+                    path_for_allowlist, self.config.app_allowlist
                 ):
-                    if DEBUG_MODE:
+                    if self.config.debug:
                         print(f"    ✓ In use: {path_for_allowlist}")
                     return True
             except FileNotFoundError:
@@ -389,8 +365,8 @@ class TeamsMonitor:
         )
 
         try:
-            if DEBUG_MODE:
-                print(f"  Checking {device_type} (allowlist={APP_ALLOWLIST!r}):")
+            if self.config.debug:
+                print(f"  Checking {device_type} (allowlist={self.config.app_allowlist!r}):")
 
             i = 0
             root_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
@@ -406,18 +382,18 @@ class TeamsMonitor:
                     if self._consent_key_device_active(
                         registry_path, child_relative, subkey_name
                     ):
-                        if DEBUG_MODE:
+                        if self.config.debug:
                             print(f"    Result: device_active=True")
                         return True
             finally:
                 winreg.CloseKey(root_key)
 
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"    Result: device_active=False")
             return False
 
         except Exception as e:
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"Error checking {device_type}: {e}")
             return False
 
@@ -433,7 +409,7 @@ class TeamsMonitor:
         mic_device_active = self.is_device_in_use("microphone")
         cam_device_active = self.is_device_in_use("webcam")
         
-        if DEBUG_MODE:
+        if self.config.debug:
             print(f"\nDevice Status - Mic: {mic_device_active}, Cam: {cam_device_active}")
         
         # If neither device is active, not in a call
@@ -467,7 +443,7 @@ class TeamsMonitor:
                 # (i.e., we've seen audio before but now it's been zero for a long time)
                 mic_muted = self.audio_monitor.is_muted()
             
-            if DEBUG_MODE:
+            if self.config.debug:
                 print(f"Mic muted: {mic_muted} (system: {system_muted}), Audio flowing: {mic_audio_active}")
         
         # Determine state based on device usage, mute state, and audio activity
@@ -496,26 +472,26 @@ class TeamsMonitor:
     
     def set_wled_color(self, state: str, retry_count: int = 0):
         """Send color and effect command to WLED device with retry logic"""
-        color = COLORS[state]
+        color = self.config.colors[state]
         r, g, b = color
         
         # Get the effect for this state
-        effect_name = STATE_EFFECTS.get(state, 'solid')
-        effect_id = EFFECTS.get(effect_name, 0)
+        effect_name = self.config.state_effects.get(state, 'solid')
+        effect_id = self.config.effects.get(effect_name, 0)
         
-        url = f"http://{self.wled_ip}/json/state"
+        url = f"http://{self.wled_host}/json/state"
         payload = {
             "on": True,
-            "bri": BRIGHTNESS,
+            "bri": self.config.brightness,
             "seg": [{
                 "col": [[r, g, b]],
                 "fx": effect_id,
-                "sx": EFFECT_SPEED,
-                "ix": EFFECT_INTENSITY
+                "sx": self.config.effect_speed,
+                "ix": self.config.effect_intensity
             }]
         }
         
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(self.config.max_retries):
             try:
                 # Use session for connection pooling and reuse
                 response = self.session.post(url, json=payload, timeout=5)
@@ -524,8 +500,8 @@ class TeamsMonitor:
                     self.last_wled_update = time.time()
                     return True
                 else:
-                    if attempt < MAX_RETRIES - 1:
-                        if DEBUG_MODE:
+                    if attempt < self.config.max_retries - 1:
+                        if self.config.debug:
                             print(f"  WLED returned status {response.status_code}, retrying...")
                         time.sleep(0.5 * (attempt + 1))  # Exponential backoff
                         continue
@@ -534,8 +510,8 @@ class TeamsMonitor:
                         return False
                         
             except requests.exceptions.Timeout:
-                if attempt < MAX_RETRIES - 1:
-                    if DEBUG_MODE:
+                if attempt < self.config.max_retries - 1:
+                    if self.config.debug:
                         print(f"  WLED request timed out, retrying...")
                     time.sleep(0.5 * (attempt + 1))
                     # Reset session on timeout to clear stale connections
@@ -543,12 +519,12 @@ class TeamsMonitor:
                     self.session = requests.Session()
                     continue
                 else:
-                    print(f"Error: WLED request timed out after {MAX_RETRIES} attempts")
+                    print(f"Error: WLED request timed out after {self.config.max_retries} attempts")
                     return False
                     
             except requests.exceptions.ConnectionError as e:
-                if attempt < MAX_RETRIES - 1:
-                    if DEBUG_MODE:
+                if attempt < self.config.max_retries - 1:
+                    if self.config.debug:
                         print(f"  WLED connection error, retrying...")
                     time.sleep(0.5 * (attempt + 1))
                     # Reset session on connection error
@@ -560,8 +536,8 @@ class TeamsMonitor:
                     return False
                     
             except requests.exceptions.RequestException as e:
-                if attempt < MAX_RETRIES - 1:
-                    if DEBUG_MODE:
+                if attempt < self.config.max_retries - 1:
+                    if self.config.debug:
                         print(f"  WLED request error, retrying...")
                     time.sleep(0.5 * (attempt + 1))
                     continue
@@ -573,23 +549,23 @@ class TeamsMonitor:
     
     def turn_off_wled(self):
         """Turn the WLED light completely off"""
-        url = f"http://{self.wled_ip}/json/state"
+        url = f"http://{self.wled_host}/json/state"
         payload = {"on": False}
         
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(self.config.max_retries):
             try:
                 response = self.session.post(url, json=payload, timeout=5)
                 if response.status_code == 200:
                     return True
                 else:
-                    if attempt < MAX_RETRIES - 1:
+                    if attempt < self.config.max_retries - 1:
                         time.sleep(0.5 * (attempt + 1))
                         continue
                     else:
                         print(f"WLED returned status {response.status_code}")
                         return False
             except requests.exceptions.RequestException as e:
-                if attempt < MAX_RETRIES - 1:
+                if attempt < self.config.max_retries - 1:
                     time.sleep(0.5 * (attempt + 1))
                     self.session.close()
                     self.session = requests.Session()
@@ -599,110 +575,141 @@ class TeamsMonitor:
                     return False
         return False
     
-    def run(self):
-        """Main monitoring loop"""
+    def shutdown(self) -> None:
+        """Turn off WLED and close HTTP session."""
+        try:
+            self.turn_off_wled()
+        finally:
+            self.session.close()
+
+    def run(
+        self,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
+        """Main monitoring loop. Stops when stop_event is set or home Wi-Fi is lost."""
+        interval = self.config.check_interval
         print("=" * 60)
         print("Teams Status Light Controller with Audio Monitoring")
         print(f"Version {__version__}")
         print("=" * 60)
-        print(f"WLED IP: {self.wled_ip}")
-        print(f"Check interval: {CHECK_INTERVAL}s")
-        print(f"Audio threshold: {AUDIO_THRESHOLD}")
-        print(f"Audio detection window: {AUDIO_DETECTION_WINDOW}s")
+        print(f"WLED host: {self.wled_host}")
+        print(f"Home Wi-Fi: {self.config.home_wifi_ssid}")
+        print(f"Check interval: {interval}s")
+        print(f"Audio threshold: {self.config.audio_threshold}")
+        print(f"Audio detection window: {self.config.audio_detection_window}s")
         print("\nColor and Effect scheme:")
-        for state, color in COLORS.items():
-            effect = STATE_EFFECTS.get(state, 'solid')
-            state_name = state.replace('_', ' ').title()
+        for state, color in self.config.colors.items():
+            effect = self.config.state_effects.get(state, "solid")
+            state_name = state.replace("_", " ").title()
             print(f"  {state_name}: RGB{color} - {effect}")
         print("\nMonitoring started. Press Ctrl+C to stop.")
         print("=" * 60)
-        
-        # Test WLED connection
+
         print("\nTesting WLED connection...")
-        if self.set_wled_color('off'):
-            print("✓ WLED connection successful (light should be GREEN)\n")
-            self.last_wled_update = time.time()  # Initialize update time
+        if self.set_wled_color("off"):
+            print("WLED connection successful (light should be GREEN)\n")
+            self.last_wled_update = time.time()
+            self._publish_state("off")
         else:
-            print("✗ Could not connect to WLED. Check IP address.\n")
-            self.last_wled_update = time.time()  # Initialize anyway to prevent immediate timeout
-        
+            print("Could not connect to WLED. Check wled_host in config.yaml.\n")
+            self.last_wled_update = time.time()
+            self._publish_state("off")
+
         try:
             while True:
+                if stop_event and stop_event.is_set():
+                    break
+
+                if not is_on_home_wifi(self.config.home_wifi_ssid):
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    print(
+                        f"[{timestamp}] Not on home Wi-Fi ({self.config.home_wifi_ssid!r}) - shutting down"
+                    )
+                    self.turn_off_wled()
+                    break
+
                 current_time = time.time()
                 time_since_last_check = current_time - self.last_check_time
-                
-                # Detect if system was asleep (large time gap between checks)
-                # If more than 2x CHECK_INTERVAL has passed, system likely slept
+
                 wake_detected = False
-                if time_since_last_check > (CHECK_INTERVAL * 2):
+                if time_since_last_check > (interval * 2):
                     wake_detected = True
-                    if DEBUG_MODE:
+                    if self.config.debug:
                         timestamp = datetime.now().strftime("%H:%M:%S")
-                        print(f"[{timestamp}] Detected system wake (gap: {time_since_last_check:.1f}s) - refreshing state")
-                
+                        print(
+                            f"[{timestamp}] Detected system wake (gap: {time_since_last_check:.1f}s) - refreshing state"
+                        )
+
                 self.last_check_time = current_time
                 current_state = self.get_current_state()
-                
-                # If we detected a wake and not in a call, turn off the light
-                if wake_detected and current_state == 'off':
+                if current_state:
+                    self._publish_state(current_state)
+
+                if wake_detected and current_state == "off":
                     timestamp = datetime.now().strftime("%H:%M:%S")
                     print(f"[{timestamp}] System woke - turning off light (not in call)")
                     self.turn_off_wled()
-                    self.last_state = None  # Force state update on next check if needed
+                    self.last_state = None
+
                 time_since_update = current_time - self.last_wled_update
-                
-                # Check for idle timeout (if enabled)
-                if IDLE_TIMEOUT > 0 and time_since_update >= IDLE_TIMEOUT:
+
+                if self.config.idle_timeout > 0 and time_since_update >= self.config.idle_timeout:
                     timestamp = datetime.now().strftime("%H:%M:%S")
-                    print(f"[{timestamp}] Idle timeout ({IDLE_TIMEOUT}s) - turning off light")
+                    print(
+                        f"[{timestamp}] Idle timeout ({self.config.idle_timeout}s) - turning off light"
+                    )
                     if self.turn_off_wled():
-                        self.last_wled_update = time.time()  # Reset timer after successful off command
-                    # Continue monitoring - light will turn back on when state changes
-                
-                # Update if state changed OR if keep-alive interval has passed
+                        self.last_wled_update = time.time()
+
                 state_changed = current_state != self.last_state
-                keep_alive_needed = time_since_update >= KEEP_ALIVE_INTERVAL
-                
+                keep_alive_needed = time_since_update >= self.config.keep_alive_interval
+
                 if state_changed or keep_alive_needed:
-                    if state_changed:
+                    if state_changed and current_state:
                         timestamp = datetime.now().strftime("%H:%M:%S")
-                        effect = STATE_EFFECTS.get(current_state, 'solid')
-                        state_name = current_state.replace('_', ' ').title()
+                        effect = self.config.state_effects.get(current_state, "solid")
+                        state_name = current_state.replace("_", " ").title()
                         print(f"[{timestamp}] State: {state_name} (effect: {effect})")
-                    elif DEBUG_MODE:
+                    elif self.config.debug:
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"[{timestamp}] Keep-alive: Refreshing WLED state")
-                    
-                    if self.set_wled_color(current_state):
+
+                    if current_state and self.set_wled_color(current_state):
                         self.last_state = current_state
                     else:
                         if state_changed:
                             print("  Failed to update WLED")
-                        elif DEBUG_MODE:
+                        elif self.config.debug:
                             print("  Keep-alive failed, will retry on next interval")
-                
-                time.sleep(CHECK_INTERVAL)
-                
+
+                if stop_event:
+                    if stop_event.wait(interval):
+                        break
+                else:
+                    time.sleep(interval)
+
         except KeyboardInterrupt:
             print("\n\nStopping monitor...")
-            self.turn_off_wled()
-            self.session.close()
-            print("Light turned OFF. Goodbye!")
+
+        self.shutdown()
+        print("Light turned OFF. Goodbye!")
+
+
+def create_monitor(config_path: Optional[Path] = None) -> TeamsMonitor:
+    config = load_config(config_path)
+    return TeamsMonitor(config)
 
 
 if __name__ == "__main__":
     print("\nInitializing...")
-    # Create and run monitor
-    monitor = TeamsMonitor(WLED_IP)
-    
-    # Register cleanup function to turn off light on exit
+    monitor = create_monitor()
+
     def cleanup():
         try:
-            monitor.turn_off_wled()
-            monitor.session.close()
-        except:
-            pass  # Ignore errors during cleanup
-    
+            monitor.shutdown()
+        except Exception:
+            pass
+
     atexit.register(cleanup)
-    
+
     monitor.run()
