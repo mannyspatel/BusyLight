@@ -1,9 +1,11 @@
 # Teams Status Light Controller for WLED
 
-A Python application that monitors your Microsoft Teams call status and controls a WLED smart light to display your availability at a glance.
+A Python application that monitors video-call status (Teams, Zoom, Webex, and other meeting apps) and controls a WLED smart light to display your availability at a glance.
 
 ## Features
 
+- **Multi-App Call Detection**: Detects mic/camera use from Teams, Zoom, Webex, RingCentral, Skype, and more via Windows ConsentStore
+- **Configurable App Allowlist**: Limit which apps trigger the busy light, or allow any app
 - **Camera Detection**: Automatically detects when your camera is active
 - **Microphone Mute Detection**: Accurately detects when your microphone is muted (not just silent)
 - **Audio Activity Detection**: Shows when you're actively speaking
@@ -16,7 +18,7 @@ A Python application that monitors your Microsoft Teams call status and controls
 
 | Status | Color | Effect | Meaning |
 |--------|-------|--------|---------|
-| Not In Call | Green | Solid | You're offline/not in a Teams call |
+| Not In Call | Green | Solid | You're offline/not in a call |
 | In Call - Muted | Orange | Solid | In a call, camera off, microphone is muted |
 | In Call - Quiet | Yellow | Solid | In a call, camera off, unmuted but not speaking |
 | In Call - Talking | Yellow | Breathe | In a call, camera off, actively speaking |
@@ -60,11 +62,32 @@ Save the `teams_light_controller.py` file to a location on your computer (e.g., 
 Open `teams_light_controller.py` in a text editor and verify/update these settings:
 
 ```python
-WLED_HOST = "wled-busylight.lan"  # Your WLED device hostname
+WLED_IP = "wled-busylight.lan"  # Your WLED device hostname
 CHECK_INTERVAL = 1.5              # Seconds between checks
 BRIGHTNESS = 128                  # Light brightness (0-255)
 EFFECT_SPEED = 128                # Animation speed (0-255)
 ```
+
+### Meeting app allowlist (optional)
+
+By default the script watches common meeting apps only (reduces false positives from random mic/camera access):
+
+```python
+APP_ALLOWLIST = [
+    "teams",
+    "ms-teams",
+    "zoom",
+    "webex",
+    "ringcentral",
+    "skype",
+]
+```
+
+Matching is **case-insensitive** and uses **substring** checks against each app's ConsentStore registry path (including `NonPackaged` entries such as `Zoom.exe`).
+
+**Zoom example:** No extra setup is needed if `"zoom"` stays in the list. Join a Zoom call; when Zoom uses your mic or camera, the light leaves the green "not in call" state.
+
+**Detect any app:** Set `APP_ALLOWLIST = []` or `APP_ALLOWLIST = None` to treat every application that holds the mic or camera as "in a call" (useful for custom clients; may react to browsers or system apps).
 
 ## Running the Script
 
@@ -238,7 +261,7 @@ AUDIO_DETECTION_WINDOW = 2       # Seconds to keep "talking" state after sound s
 
 ### How It Works
 
-1. **Registry Monitoring**: Checks Windows registry to detect when Teams is using your camera and microphone
+1. **Registry Monitoring**: Recursively walks `HKCU\...\CapabilityAccessManager\ConsentStore\{microphone|webcam}` (including `NonPackaged` paths). When `LastUsedTimeStop` is `0`, Windows considers that app still using the device. Optional `APP_ALLOWLIST` filters which apps count.
 2. **Mute Detection**: Uses Windows Core Audio API (IAudioEndpointVolume) to detect if microphone is muted at system level
 3. **Audio Detection**: Uses Windows Core Audio API (IAudioMeterInformation) to monitor if sound is being transmitted
 4. **WLED Communication**: Sends commands to your WLED device via HTTP JSON API
@@ -261,7 +284,7 @@ If you encounter issues:
 1. **Enable Debug Mode**: Set `DEBUG_MODE = True` in the script and run it to see detailed output
 2. **Check logs**: Look for error messages in the console output
 3. **Test WLED**: Make sure you can access your WLED web interface
-4. **Verify Teams**: Make sure Teams is actually running and using the devices
+4. **Verify your meeting app**: Make sure the app is allowed in `APP_ALLOWLIST` (if configured) and is using the devices
 
 ## License
 

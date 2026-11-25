@@ -11,7 +11,7 @@ import time
 import json
 import atexit
 from datetime import datetime
-from typing import Tuple, Optional
+from typing import List, Optional, Tuple
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation, IAudioEndpointVolume, ISimpleAudioVolume
@@ -62,7 +62,27 @@ EFFECT_INTENSITY = 128  # 0-255, intensity of effects
 # Audio detection settings
 AUDIO_THRESHOLD = 0.01  # Minimum audio level to consider mic "active" (0.0-1.0)
 AUDIO_DETECTION_WINDOW = 3  # Seconds - if audio detected within this window, mic is "on"
+
+# Apps that count as "in a call" when using mic/camera (case-insensitive substring
+# match against each ConsentStore subkey path, including NonPackaged entries).
+# Set to [] or None to detect ANY application (may trigger on browser tabs, etc.).
+APP_ALLOWLIST: Optional[List[str]] = [
+    "teams",
+    "ms-teams",
+    "zoom",
+    "webex",
+    "ringcentral",
+    "skype",
+]
 # =========================================
+
+
+def _subkey_matches_allowlist(subkey_path: str, allowlist: Optional[List[str]]) -> bool:
+    """Return True if allowlist is empty/None or path contains any allowlist entry."""
+    if not allowlist:
+        return True
+    path_lower = subkey_path.lower()
+    return any(entry.lower() in path_lower for entry in allowlist)
 
 
 class AudioMonitor:
@@ -197,77 +217,105 @@ class TeamsMonitor:
         self.last_state = None
         self.audio_monitor = AudioMonitor()
         
-    def check_device_usage(self, device_type: str) -> bool:
+    def _consent_key_device_active(
+        self, registry_path: str, subkey_relative: str, path_for_allowlist: str
+    ) -> bool:
         """
-        Check if a device (microphone or webcam) is in use by Teams
-        Returns: is_teams_using_device
+        Recursively walk ConsentStore subkeys; True if LastUsedTimeStop is 0 and allowlist matches.
         """
-        registry_path = f"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\{device_type}"
-        
         try:
-            # Open the main key
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
-            
-            teams_in_use = False
-            
-            if DEBUG_MODE:
-                print(f"  Checking {device_type}:")
-            
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, subkey_relative)
+        except OSError:
+            return False
+
+        try:
+            try:
+                last_used_stop = winreg.QueryValueEx(key, "LastUsedTimeStop")[0]
+                if last_used_stop == 0 and _subkey_matches_allowlist(
+                    path_for_allowlist, APP_ALLOWLIST
+                ):
+                    if DEBUG_MODE:
+                        print(f"    ✓ In use: {path_for_allowlist}")
+                    return True
+            except FileNotFoundError:
+                pass
+
             i = 0
             while True:
                 try:
-                    subkey_name = winreg.EnumKey(key, i)
+                    child_name = winreg.EnumKey(key, i)
                     i += 1
-                    
-                    # Check if this is a Teams process
-                    is_teams = 'teams' in subkey_name.lower() or 'ms-teams' in subkey_name.lower()
-                    
-                    if is_teams:
-                        # Open the subkey to check LastUsedTimeStop
-                        try:
-                            subkey_path = f"{registry_path}\\{subkey_name}"
-                            subkey = winreg.OpenKey(winreg.HKEY_CURRENT_USER, subkey_path)
-                            
-                            try:
-                                last_used_stop = winreg.QueryValueEx(subkey, "LastUsedTimeStop")[0]
-                                
-                                # If LastUsedTimeStop is 0, the device is currently in use
-                                if last_used_stop == 0:
-                                    teams_in_use = True
-                                    if DEBUG_MODE:
-                                        print(f"    ✓ Teams is using {device_type}")
-                                        
-                            except FileNotFoundError:
-                                pass
-                            
-                            winreg.CloseKey(subkey)
-                        except:
-                            pass
-                        
                 except OSError:
-                    # No more subkeys
                     break
-            
+
+                child_relative = f"{subkey_relative}\\{child_name}"
+                child_path = f"{path_for_allowlist}\\{child_name}"
+                if self._consent_key_device_active(
+                    registry_path, child_relative, child_path
+                ):
+                    return True
+        finally:
             winreg.CloseKey(key)
-            
+
+        return False
+
+    def is_device_in_use(self, device_type: str) -> bool:
+        """
+        Check if microphone or webcam is in use by an allowed application.
+
+        Walks HKCU CapabilityAccessManager ConsentStore recursively (including
+        NonPackaged and nested paths). A subkey with LastUsedTimeStop == 0 means
+        the device is currently in use.
+        """
+        registry_path = (
+            "Software\\Microsoft\\Windows\\CurrentVersion\\"
+            f"CapabilityAccessManager\\ConsentStore\\{device_type}"
+        )
+
+        try:
             if DEBUG_MODE:
-                print(f"    Result: teams_active={teams_in_use}")
-            
-            return teams_in_use
-            
+                print(f"  Checking {device_type} (allowlist={APP_ALLOWLIST!r}):")
+
+            i = 0
+            root_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path)
+            try:
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(root_key, i)
+                        i += 1
+                    except OSError:
+                        break
+
+                    child_relative = f"{registry_path}\\{subkey_name}"
+                    if self._consent_key_device_active(
+                        registry_path, child_relative, subkey_name
+                    ):
+                        if DEBUG_MODE:
+                            print(f"    Result: device_active=True")
+                        return True
+            finally:
+                winreg.CloseKey(root_key)
+
+            if DEBUG_MODE:
+                print(f"    Result: device_active=False")
+            return False
+
         except Exception as e:
             if DEBUG_MODE:
                 print(f"Error checking {device_type}: {e}")
             return False
+
+    def check_device_usage(self, device_type: str) -> bool:
+        """Alias for is_device_in_use; kept for backward compatibility."""
+        return self.is_device_in_use(device_type)
     
     def get_current_state(self) -> Optional[str]:
         """
-        Determine current Teams call state
-        Returns state name or None
+        Determine current call state from mic/camera usage and audio levels.
+        Returns state name or None.
         """
-        # Check if Teams is using the devices
-        mic_device_active = self.check_device_usage("microphone")
-        cam_device_active = self.check_device_usage("webcam")
+        mic_device_active = self.is_device_in_use("microphone")
+        cam_device_active = self.is_device_in_use("webcam")
         
         if DEBUG_MODE:
             print(f"\nDevice Status - Mic: {mic_device_active}, Cam: {cam_device_active}")
