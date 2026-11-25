@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 function Write-Step {
     param([string]$Message)
     Write-Host ""
-    Write-Host "==> $Message" -ForegroundColor Cyan
+    Write-Host ('==> ' + $Message) -ForegroundColor Cyan
 }
 
 function Write-Ok {
@@ -137,7 +137,7 @@ function Show-ManualPythonInstructions {
     Write-Host "During setup, check ""Add Python to PATH""." -ForegroundColor Yellow
     Write-Host "Use the installer from python.org — not the Microsoft Store app execution alias stubs." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "Optional: Settings > Apps > Advanced app settings > App execution aliases —" -ForegroundColor DarkGray
+    Write-Host 'Optional: Settings, Apps, Advanced app settings, App execution aliases —' -ForegroundColor DarkGray
     Write-Host "turn off python.exe and python3.exe so Windows does not intercept the python command." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Then run this installer again." -ForegroundColor Yellow
