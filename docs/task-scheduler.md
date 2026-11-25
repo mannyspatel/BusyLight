@@ -59,3 +59,25 @@ The **Network** condition uses the saved Windows **connection profile name** fro
 You do not need a separate disconnect task. Each monitoring loop checks Wi-Fi using the same interval as status polling. When the SSID no longer matches `home_wifi_ssid`, BusyLight turns WLED off and exits.
 
 To stop manually, run `scripts/stop-busylight.ps1` or use **Exit** on the system tray icon.
+
+## Troubleshooting
+
+### Use pythonw.exe (not python.exe)
+
+Schedule **pythonw.exe** so BusyLight runs without a console window. Using **python.exe** opens a visible console that flashes or stays on screen.
+
+### General tab
+
+Set **Configure for** to your Windows version and choose **Run only when user is logged on** so the tray icon and Wi-Fi checks behave as expected.
+
+### Delays at logon
+
+If the tray icon does not appear, the task may have started before the shell is ready; optionally set **Delay task for** to **30 seconds** on the logon trigger.
+
+### Restart on failure
+
+Avoid aggressive **Restart the task on failure** settings that retry every second; use a reasonable interval (for example, several minutes) so a failing start does not loop rapidly.
+
+### Multiple instances
+
+On the **Settings** tab, set **If the task is already running** to **Do not start a new instance** so only one BusyLight process runs.

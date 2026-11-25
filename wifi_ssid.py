@@ -6,7 +6,9 @@ import locale
 import re
 import subprocess
 import sys
-from typing import List, Optional
+from typing import Any, List, Optional
+
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 
 def _decode_subprocess_output(data: bytes) -> str:
@@ -76,12 +78,15 @@ def get_connected_wifi_ssid() -> Optional[str]:
     if sys.platform != "win32":
         return None
 
+    run_kwargs: dict[str, Any] = {"creationflags": _CREATE_NO_WINDOW}
+
     try:
         completed = subprocess.run(
             ["netsh", "wlan", "show", "interfaces"],
             capture_output=True,
             timeout=10,
             check=False,
+            **run_kwargs,
         )
     except (OSError, subprocess.SubprocessError):
         return None
