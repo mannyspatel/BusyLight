@@ -10,7 +10,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
-$script:InstallerVersion = '1.2'
+$script:InstallerVersion = '1.3'
 
 function Write-Step {
     param([string]$Message)
@@ -57,7 +57,57 @@ function Test-RealPythonVersionOutput {
     return $true
 }
 
+function Import-UserPathFromRegistry {
+    try {
+        $userPath = (Get-ItemProperty -Path 'HKCU:\Environment' -Name Path -ErrorAction SilentlyContinue).Path
+        if ([string]::IsNullOrWhiteSpace($userPath)) {
+            return
+        }
+        $regDirs = $userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $prepend = @()
+        foreach ($dir in $regDirs) {
+            if ($env:PATH -notlike "*$dir*") {
+                $prepend += $dir
+            }
+        }
+        if ($prepend.Count -gt 0) {
+            $env:PATH = ($prepend -join ';') + ';' + $env:PATH
+        }
+    }
+    catch {
+        # ignore registry read failures
+    }
+}
+
+function Find-PythonOnDisk {
+    $exePaths = @()
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    $userPythonRoot = Join-Path $localAppData 'Programs\Python'
+    if (Test-Path -LiteralPath $userPythonRoot) {
+        Get-ChildItem -LiteralPath $userPythonRoot -Filter 'python.exe' -Recurse -File -ErrorAction SilentlyContinue |
+            ForEach-Object { $exePaths += $_.FullName }
+    }
+    $programFilesPattern = 'C:\Program Files\Python*'
+    Get-ChildItem -Path $programFilesPattern -Filter 'python.exe' -Recurse -File -ErrorAction SilentlyContinue |
+        ForEach-Object { $exePaths += $_.FullName }
+
+    foreach ($exe in ($exePaths | Select-Object -Unique)) {
+        try {
+            $output = @(& $exe --version 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -eq 0 -and (Test-RealPythonVersionOutput -OutputLines $output)) {
+                return @{ Launcher = 'exe'; Exe = $exe }
+            }
+        }
+        catch {
+            # try next on-disk candidate
+        }
+    }
+    return $null
+}
+
 function Find-PythonExecutable {
+    Import-UserPathFromRegistry
+
     $candidates = @(
         @{ Cmd = "py"; Args = @("-3", "--version") },
         @{ Cmd = "python"; Args = @("--version") }
@@ -77,7 +127,18 @@ function Find-PythonExecutable {
             # try next
         }
     }
-    return $null
+
+    return Find-PythonOnDisk
+}
+
+function Test-WingetInstallSuccessOutput {
+    param([string[]]$OutputLines)
+
+    if ($null -eq $OutputLines -or $OutputLines.Count -eq 0) {
+        return $false
+    }
+    $combined = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+    return ($combined -match '(?i)installed|already installed|found|successfully|no available upgrade')
 }
 
 function Test-WingetAvailable {
@@ -160,18 +221,58 @@ function Test-WingetInstallYes {
     return $true
 }
 
+function Invoke-WingetPythonInstall {
+    param([string[]]$ExtraWingetArgs)
+
+    $baseArgs = @(
+        'install', '-e', '--id', 'Python.Python.3.12',
+        '--accept-package-agreements', '--accept-source-agreements'
+    )
+    $output = @(& winget @baseArgs @ExtraWingetArgs 2>&1 | ForEach-Object { "$_" })
+    return @{
+        ExitOk     = ($LASTEXITCODE -eq 0)
+        Output     = $output
+        OutputMatch = (Test-WingetInstallSuccessOutput -OutputLines $output)
+    }
+}
+
 function Install-PythonWithWinget {
-    Write-Step "Installing Python 3.12 via winget..."
+    Write-Step "Installing Python 3.12 via winget (per-user scope first)..."
     Write-Warn "This may prompt for administrator or IT approval on corporate laptops."
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-        return ($LASTEXITCODE -eq 0)
+        $result = Invoke-WingetPythonInstall -ExtraWingetArgs @('--scope', 'user')
+        if (-not ($result.ExitOk -and $result.OutputMatch)) {
+            Write-Warn "Per-user winget install did not complete; retrying without --scope user..."
+            $result = Invoke-WingetPythonInstall -ExtraWingetArgs @()
+        }
+
+        if ($result.ExitOk -and $result.OutputMatch) {
+            return $true
+        }
+        if ($result.ExitOk -and -not $result.OutputMatch) {
+            Write-Warn "winget returned success but install may not have completed"
+        }
+        return $false
     }
     finally {
         $ErrorActionPreference = $prevEap
     }
+}
+
+function Show-WingetPythonNotFoundSteps {
+    Write-Host ""
+    Write-Host "winget indicated Python was installed, but this session still cannot run it." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Try these steps:" -ForegroundColor Yellow
+    Write-Host "  1. Settings, Apps, Advanced app settings, App execution aliases" -ForegroundColor Yellow
+    Write-Host "     - Turn OFF python.exe and python3.exe so Store stubs do not intercept the command." -ForegroundColor Yellow
+    Write-Host "  2. In PowerShell, run: winget list --id Python.Python.3.12" -ForegroundColor Yellow
+    Write-Host "     - Confirm the package is listed; if not, install failed or was blocked by policy." -ForegroundColor Yellow
+    Write-Host "  3. Install from https://www.python.org/downloads/ with ""Add Python to PATH"" checked." -ForegroundColor Yellow
+    Write-Host "  4. Close this window, open a new one, and run the installer again." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 function Invoke-Python {
@@ -179,7 +280,10 @@ function Invoke-Python {
         [hashtable]$Python,
         [string[]]$ScriptArgs
     )
-    if ($Python.Launcher -eq "py") {
+    if ($Python.Launcher -eq 'exe') {
+        & $Python.Exe @ScriptArgs
+    }
+    elseif ($Python.Launcher -eq "py") {
         & py @($Python.PyArgs + $ScriptArgs)
     }
     else {
@@ -192,7 +296,10 @@ function Invoke-Pip {
         [hashtable]$Python,
         [string[]]$PipSubArgs
     )
-    if ($Python.Launcher -eq "py") {
+    if ($Python.Launcher -eq 'exe') {
+        & $Python.Exe -m pip @PipSubArgs
+    }
+    elseif ($Python.Launcher -eq "py") {
         & py @($Python.PyArgs + @("-m", "pip") + $PipSubArgs)
     }
     else {
@@ -371,13 +478,18 @@ if ($null -eq $python) {
             $wingetInstalled = Install-PythonWithWinget
             if ($wingetInstalled) {
                 Write-Ok "winget reported Python installation finished"
+                Import-UserPathFromRegistry
                 Refresh-SessionPythonPath
+                Start-Sleep -Seconds 2
                 Write-Step "Looking for Python after winget install..."
                 $python = Find-PythonExecutable
+                if ($null -eq $python) {
+                    Show-WingetPythonNotFoundSteps
+                }
             }
             else {
                 Write-Host ""
-                Write-Host "winget could not install Python (missing rights, policy, or network)." -ForegroundColor Red
+                Write-Host "winget could not install Python (missing rights, policy, network, or inconclusive output)." -ForegroundColor Red
             }
         }
         else {
